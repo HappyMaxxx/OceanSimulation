@@ -47,17 +47,20 @@ class Fish:
         
         self.is_predator = (sum(self.genome["predator"]) / 2) > 0.5
         
+        self.age = 0
+        self.max_size = (sum(self.genome["size"]) / 2) * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
+        
         if self.is_predator:
             self.speed = (sum(self.genome["speed"]) / 2) * 1.5 + 0.5
-            self.size = (sum(self.genome["size"]) / 2) * 10 + 5
+            self.size = 3
             self.vision = (sum(self.genome["vision"]) / 2) * 100 + 50
-            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.05
+            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.1
             self.energy_threshold = 40
         else:
             self.speed = (sum(self.genome["speed"]) / 2) * 2.5 + 1
-            self.size = (sum(self.genome["size"]) / 2) * 6 + 3
+            self.size = 2
             self.vision = (sum(self.genome["vision"]) / 2) * 60 + 30
-            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.15
+            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.3
             self.energy_threshold = 20
         
         self.metabolism = sum(self.genome["metabolism"]) / 2
@@ -80,6 +83,13 @@ class Fish:
         self.tail_speed = 0.2
         self.is_dead = False
         self.float_speed = 0.5
+    
+    def grow(self):
+        if not self.is_dead and self.size < self.max_size:
+            growth_rate = 0.01 * (self.energy / MAX_ENERGY) * (1 + self.metabolism)
+            self.size = min(self.max_size, self.size + growth_rate)
+            self.speed = ((sum(self.genome["speed"]) / 2) * (1.5 if self.is_predator else 2.5) + 
+                         (0.5 if self.is_predator else 1)) * (1 - self.size / 20) + self.metabolism * 0.5
     
     def find_nearest_food(self, food_list):
         if not food_list:
@@ -109,6 +119,9 @@ class Fish:
                 return
             return
 
+        self.age += 1
+        self.grow()
+
         current_strength = (HEIGHT - self.y) / HEIGHT * 0.5
         self.x += current_strength
 
@@ -130,7 +143,7 @@ class Fish:
             else:
                 self.direction = desired_angle
             self.direction = self.direction % (2 * math.pi)
-            self.x += math.cos(self.direction) * self.speed * 1.2  # Прискорення при втечі
+            self.x += math.cos(self.direction) * self.speed * 1.2
             self.y += math.sin(self.direction) * self.speed * 1.2
         else:
             target = None
@@ -201,7 +214,7 @@ class Fish:
             return None
         
         distance = math.hypot(self.x - partner.x, self.y - partner.y)
-        if distance > self.size + partner.size:
+        if distance > (self.size + partner.size) * 2:
             return None
         
         if self.energy < 30 or partner.energy < 30:
@@ -228,6 +241,9 @@ class Fish:
         if self.is_dead:
             pygame.draw.circle(screen, (100, 100, 100), (int(self.x), int(self.y)), int(self.size))
         else:
+            if self.is_predator:
+                pygame.draw.circle(screen, (255, 0, 0), (int(self.x), int(self.y)), int(self.size) + 1, 1)
+
             if self.ready_to_mate:
                 pygame.draw.circle(screen, (255, 255, 0), (int(self.x), int(self.y)), int(self.size) + 2, 1)
             pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), int(self.size))
@@ -274,7 +290,8 @@ while running:
         nearest_prey = fish.find_nearest_prey(fish_population) if fish.is_predator and not fish.is_dead else None
         nearest_mate = fish.find_nearest_mate(fish_population) if not fish.is_dead else None
         
-        fish.move(nearest_food, nearest_prey, nearest_mate)
+        predators = [f for f in fish_population if f.is_predator and not f.is_dead]
+        fish.move(nearest_food, nearest_prey, nearest_mate, predators)
         fish.eat(food_list, fish_population)
         
         if fish.ready_to_mate and nearest_mate:
@@ -301,7 +318,10 @@ while running:
     for fish in fish_population:
         fish.draw(screen)
     
-    stats = font.render(f"Fish: {len(fish_population)}  Food: {len(food_list)}", True, (255, 255, 255))
+    predators = len([f for f in fish_population if f.is_predator])
+    stats = font.render(f"Fish: {len(fish_population)}  Predators: {predators}  Food: {len(food_list)}",
+                         True, (255, 255, 255)
+                        )
     screen.blit(stats, (10, 10))
     
     pygame.display.flip()
