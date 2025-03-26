@@ -53,13 +53,15 @@ class Fish:
         if self.is_predator:
             self.speed = (sum(self.genome["speed"]) / 2) * 1.5 + 0.5
             self.size = 3
-            self.vision = (sum(self.genome["vision"]) / 2) * 100 + 50
+            self.vision = (sum(self.genome["vision"]) / 2) * 100 + 50        # Зір для їжі/здобичі
+            self.mate_vision = (sum(self.genome["vision"]) / 2) * 150 + 75  # Більший зір для розмноження
             self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.1
             self.energy_threshold = 40
         else:
             self.speed = (sum(self.genome["speed"]) / 2) * 2.5 + 1
             self.size = 2
-            self.vision = (sum(self.genome["vision"]) / 2) * 60 + 30
+            self.vision = (sum(self.genome["vision"]) / 2) * 60 + 30         # Зір для їжі
+            self.mate_vision = (sum(self.genome["vision"]) / 2) * 80 + 40   # Більший зір для розмноження
             self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.3
             self.energy_threshold = 20
         
@@ -134,7 +136,19 @@ class Fish:
             else:
                 nearest_predator = min(predators, key=lambda p: math.hypot(p.x - self.x, p.y - self.y), default=None)
 
+        if self.is_predator and self.energy < MAX_ENERGY * 0.2: 
+            self.preferred_depth = random.uniform(0, HEIGHT / 3)
+        elif self.is_predator and self.energy > MAX_ENERGY * 0.8: 
+            self.preferred_depth = (sum(self.genome["preferred_depth"]) / 2) * HEIGHT
+
+        # Пріоритет дій:
+        # 1. Втеча від хижака
+        # 2. Розмноження (якщо готові)
+        # 3. Полювання/пошук їжі
+        # 4. Рух до preferred_depth
+        
         if nearest_predator and math.hypot(nearest_predator.x - self.x, nearest_predator.y - self.y) < self.vision * 1.5:
+            # Втеча від хижака - найвищий пріоритет
             desired_angle = math.atan2(self.y - nearest_predator.y, self.x - nearest_predator.x)
             angle_diff = desired_angle - self.direction
             angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
@@ -145,32 +159,51 @@ class Fish:
             self.direction = self.direction % (2 * math.pi)
             self.x += math.cos(self.direction) * self.speed * 1.2
             self.y += math.sin(self.direction) * self.speed * 1.2
-        else:
-            target = None
-            if self.ready_to_mate and target_mate and math.hypot(target_mate.x - self.x, target_mate.y - self.y) < self.vision:
-                target = target_mate
-            elif self.is_predator and target_prey and math.hypot(target_prey.x - self.x, target_prey.y - self.y) < self.vision:
-                target = target_prey
-            elif not self.is_predator and target_food and math.hypot(target_food.x - self.x, target_food.y - self.y) < self.vision:
-                target = target_food
-
-            if target:
-                desired_angle = math.atan2(target.y - self.y, target.x - self.x)
-                angle_diff = desired_angle - self.direction
-                angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
-                if abs(angle_diff) > self.turn_speed:
-                    self.direction += self.turn_speed if angle_diff > 0 else -self.turn_speed
-                else:
-                    self.direction = desired_angle
-                self.direction = self.direction % (2 * math.pi)
+        elif (self.ready_to_mate and target_mate and 
+              math.hypot(target_mate.x - self.x, target_mate.y - self.y) < self.mate_vision):
+            # Розмноження - другий пріоритет
+            desired_angle = math.atan2(target_mate.y - self.y, target_mate.x - self.x)
+            angle_diff = desired_angle - self.direction
+            angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
+            if abs(angle_diff) > self.turn_speed:
+                self.direction += self.turn_speed if angle_diff > 0 else -self.turn_speed
             else:
-                desired_angle = math.atan2(self.preferred_depth - self.y, 10)
-                angle_diff = desired_angle - self.direction
-                angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
-                if abs(angle_diff) > self.turn_speed / 2:
-                    self.direction += (self.turn_speed / 2) if angle_diff > 0 else -(self.turn_speed / 2)
-                self.direction = max(-math.pi/2, min(math.pi/2, self.direction))
-
+                self.direction = desired_angle
+            self.direction = self.direction % (2 * math.pi)
+            self.x += math.cos(self.direction) * self.speed
+            self.y += math.sin(self.direction) * self.speed
+        elif self.is_predator and target_prey and math.hypot(target_prey.x - self.x, target_prey.y - self.y) < self.vision:
+            # Полювання для хижаків - третій пріоритет
+            desired_angle = math.atan2(target_prey.y - self.y, target_prey.x - self.x)
+            angle_diff = desired_angle - self.direction
+            angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
+            if abs(angle_diff) > self.turn_speed:
+                self.direction += self.turn_speed if angle_diff > 0 else -self.turn_speed
+            else:
+                self.direction = desired_angle
+            self.direction = self.direction % (2 * math.pi)
+            self.x += math.cos(self.direction) * self.speed
+            self.y += math.sin(self.direction) * self.speed
+        elif not self.is_predator and target_food and math.hypot(target_food.x - self.x, target_food.y - self.y) < self.vision:
+            # Пошук їжі для не-хижаків - третій пріоритет
+            desired_angle = math.atan2(target_food.y - self.y, target_food.x - self.x)
+            angle_diff = desired_angle - self.direction
+            angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
+            if abs(angle_diff) > self.turn_speed:
+                self.direction += self.turn_speed if angle_diff > 0 else -self.turn_speed
+            else:
+                self.direction = desired_angle
+            self.direction = self.direction % (2 * math.pi)
+            self.x += math.cos(self.direction) * self.speed
+            self.y += math.sin(self.direction) * self.speed
+        else:
+            # Рух до preferred_depth - найнижчий пріоритет
+            desired_angle = math.atan2(self.preferred_depth - self.y, 10)
+            angle_diff = desired_angle - self.direction
+            angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
+            if abs(angle_diff) > self.turn_speed / 2:
+                self.direction += (self.turn_speed / 2) if angle_diff > 0 else -(self.turn_speed / 2)
+            self.direction = max(-math.pi/2, min(math.pi/2, self.direction))
             self.x += math.cos(self.direction) * self.speed
             self.y += math.sin(self.direction) * self.speed
 
@@ -254,6 +287,7 @@ class Fish:
         pygame.draw.line(screen, (255, 255, 255), (int(self.x), int(self.y)), 
                         (int(tail_x), int(tail_y)), 2)
 
+
 def draw_background(screen):
     for y in range(HEIGHT):
         blue = max(0, int(255 - (y / HEIGHT) * 205))
@@ -318,7 +352,7 @@ while running:
     for fish in fish_population:
         fish.draw(screen)
     
-    predators = len([f for f in fish_population if f.is_predator])
+    predators = len([f for f in fish_population if f.is_predator and not f.is_dead])
     stats = font.render(f"Fish: {len(fish_population)}  Predators: {predators}  Food: {len(food_list)}",
                          True, (255, 255, 255)
                         )
