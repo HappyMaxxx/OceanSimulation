@@ -7,6 +7,7 @@ from settings import *
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Fish Evolution - Food Decay")
+font = pygame.font.Font(None, 36)
 clock = pygame.time.Clock()
 
 class Food:
@@ -24,7 +25,7 @@ class Food:
         self.lifetime -= 1 
 
 class Fish:
-    def __init__(self, x, y, energy, genome=None):
+    def __init__(self, x, y, energy, is_predator = None ,genome = None):
         self.x = x
         self.y = y
         self.energy = min(energy, MAX_ENERGY)
@@ -45,7 +46,7 @@ class Fish:
         else:
             self.genome = genome
         
-        self.is_predator = (sum(self.genome["predator"]) / 2) > 0.5
+        self.is_predator = is_predator if is_predator else (sum(self.genome["predator"]) / 2) > 0.5
         
         self.age = 0
         self.max_size = (sum(self.genome["size"]) / 2) * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
@@ -268,7 +269,7 @@ class Fish:
         self.ready_to_mate = False
         partner.ready_to_mate = False
         
-        return Fish(self.x, self.y, 30, child_genome)
+        return Fish(self.x, self.y, 30, self.is_predator, child_genome)
     
     def draw(self, screen):
         if self.is_dead:
@@ -288,77 +289,105 @@ class Fish:
                         (int(tail_x), int(tail_y)), 2)
 
 
-def draw_background(screen):
-    for y in range(HEIGHT):
-        blue = max(0, int(255 - (y / HEIGHT) * 205))
-        green = max(0, int(150 - (y / HEIGHT) * 150))
-        red = max(0, int(50 - (y / HEIGHT) * 50))
-        pygame.draw.line(screen, (red, green, blue), (0, y), (WIDTH, y))
+class EventHandler:
+    def __init__(self, simulation: 'Simulation') -> None:
+        self.simulation = simulation
 
-fish_population = [Fish(random.randint(0, WIDTH), random.randint(0, HEIGHT), 50) 
-                  for _ in range(NUM_FISH)]
-food_list = [Food(random.randint(0, WIDTH), random.randint(0, HEIGHT)) 
-             for _ in range(INITIAL_FOOD)]
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+                
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                pass
 
-running = True
-font = pygame.font.Font(None, 36)
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE:
+                    self.simulation.paused = not self.simulation.paused 
 
-while running:
-    draw_background(screen)
-    
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-    
-    if random.random() < 0.05:
-        if random.random() < 0.7:
-            food_list.append(Food(random.randint(0, WIDTH), random.randint(int(HEIGHT/2), HEIGHT)))
-        else:
-            food_list.append(Food(random.randint(0, WIDTH), random.randint(0, int(HEIGHT/2))))
-    
-    new_fish = []
-    for fish in fish_population[:]:
-        fish.check_mating_readiness()
-        
-        nearest_food = fish.find_nearest_food(food_list) if not fish.is_predator else None
-        nearest_prey = fish.find_nearest_prey(fish_population) if fish.is_predator and not fish.is_dead else None
-        nearest_mate = fish.find_nearest_mate(fish_population) if not fish.is_dead else None
-        
-        predators = [f for f in fish_population if f.is_predator and not f.is_dead]
-        fish.move(nearest_food, nearest_prey, nearest_mate, predators)
-        fish.eat(food_list, fish_population)
-        
-        if fish.ready_to_mate and nearest_mate:
-            baby = fish.mate(nearest_mate)
-            if baby:
-                new_fish.append(baby)
-        
-        if fish.energy <= 0 and not fish.is_dead:
-            fish.is_dead = True
-            fish.energy = max(fish.energy, 10)
-        if fish.is_dead and fish.y <= 0:
-            fish_population.remove(fish)
-    
-    fish_population.extend(new_fish)
-    
-    for food in food_list[:]:
-        food.update()
-        if food.lifetime <= 0:
-            food_list.remove(food)
-        else:
-            green = int(255 * (food.lifetime / food.initial_lifetime))
-            pygame.draw.circle(screen, (0, green, 0), (int(food.x), int(food.y)), 3)
-    
-    for fish in fish_population:
-        fish.draw(screen)
-    
-    predators = len([f for f in fish_population if f.is_predator and not f.is_dead])
-    stats = font.render(f"Fish: {len(fish_population)}  Predators: {predators}  Food: {len(food_list)}",
-                         True, (255, 255, 255)
-                        )
-    screen.blit(stats, (10, 10))
-    
-    pygame.display.flip()
-    clock.tick(60)
 
-pygame.quit()
+class Simulation:
+    def __init__(self):
+        self.fish_population = [Fish(random.randint(0, WIDTH), random.randint(0, HEIGHT), 50)
+                            for _ in range(NUM_FISH)]
+        self.food_list = [Food(random.randint(0, WIDTH), random.randint(0, HEIGHT))
+                        for _ in range(INITIAL_FOOD)]
+        self.running = True
+        self.paused = False
+        self.event_handler = EventHandler(self)
+
+    @staticmethod
+    def draw_background(screen):
+        for y in range(HEIGHT):
+            blue = max(0, int(255 - (y / HEIGHT) * 205))
+            green = max(0, int(150 - (y / HEIGHT) * 150))
+            red = max(0, int(50 - (y / HEIGHT) * 50))
+            pygame.draw.line(screen, (red, green, blue), (0, y), (WIDTH, y))
+
+    def run(self):
+        while self.running:
+            self.draw_background(screen)
+            
+            self.event_handler.handle_events()
+
+            if not self.paused:
+                if random.random() < 0.05:
+                    if random.random() < 0.7:
+                        self.food_list.append(Food(random.randint(0, WIDTH), random.randint(int(HEIGHT/2), HEIGHT)))
+                    else:
+                        self.food_list.append(Food(random.randint(0, WIDTH), random.randint(0, int(HEIGHT/2))))
+                
+                new_fish = []
+                for fish in self.fish_population[:]:
+                    fish.check_mating_readiness()
+                    
+                    nearest_food = fish.find_nearest_food(self.food_list) if not fish.is_predator else None
+                    nearest_prey = fish.find_nearest_prey(self.fish_population) if fish.is_predator and not fish.is_dead else None
+                    nearest_mate = fish.find_nearest_mate(self.fish_population) if not fish.is_dead else None
+                    
+                    predators = [f for f in self.fish_population if f.is_predator and not f.is_dead]
+                    fish.move(nearest_food, nearest_prey, nearest_mate, predators)
+                    fish.eat(self.food_list, self.fish_population)
+                    
+                    if fish.ready_to_mate and nearest_mate:
+                        baby = fish.mate(nearest_mate)
+                        if baby:
+                            new_fish.append(baby)
+                    
+                    if fish.energy <= 0 and not fish.is_dead:
+                        fish.is_dead = True
+                        fish.energy = max(fish.energy, 10)
+                    if fish.is_dead and fish.y <= 0:
+                        self.fish_population.remove(fish)
+                
+                self.fish_population.extend(new_fish)
+                
+                for food in self.food_list[:]:
+                    food.update()
+                    if food.lifetime <= 0:
+                        self.food_list.remove(food)
+
+            for food in self.food_list:
+                green = int(255 * (food.lifetime / food.initial_lifetime))
+                pygame.draw.circle(screen, (0, green, 0), (int(food.x), int(food.y)), 3)
+                
+            for fish in self.fish_population:
+                fish.draw(screen)
+            
+            predators = len([f for f in self.fish_population if f.is_predator and not f.is_dead])
+            stats = font.render(f"Fish: {len([f for f in self.fish_population if not f.is_dead])} Predators: {predators}  Food: {len(self.food_list)}",
+                              True, (255, 255, 255))
+            screen.blit(stats, (10, 10))
+            
+            if self.paused:
+                pause_text = font.render("PAUSED", True, (255, 255, 255))
+                screen.blit(pause_text, (WIDTH//2 - pause_text.get_width()//2, HEIGHT//2 - pause_text.get_height()//2))
+            
+            pygame.display.flip()
+            clock.tick(60)
+
+if __name__ == "__main__":
+    sim = Simulation()
+    sim.run()
+    pygame.quit()
