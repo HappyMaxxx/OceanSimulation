@@ -1,6 +1,8 @@
 import pygame
 import random
 import math
+import tkinter as tk
+from threading import Thread
 
 from settings import *
 
@@ -25,7 +27,7 @@ class Food:
         self.lifetime -= 1 
 
 class Fish:
-    def __init__(self, x, y, energy, is_predator = None ,genome = None):
+    def __init__(self, x, y, energy, genome = None):
         self.x = x
         self.y = y
         self.energy = min(energy, MAX_ENERGY)
@@ -46,7 +48,7 @@ class Fish:
         else:
             self.genome = genome
         
-        self.is_predator = is_predator if is_predator else (sum(self.genome["predator"]) / 2) > 0.5
+        self.is_predator = (sum(self.genome["predator"]) / 2) > 0.5
         
         self.age = 0
         self.max_size = (sum(self.genome["size"]) / 2) * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
@@ -122,10 +124,11 @@ class Fish:
                 return
             return
 
-        self.age += 1
+        self.age += 0.1
         self.grow()
 
         current_strength = (HEIGHT - self.y) / HEIGHT * 0.5
+        # current_strength = self.current_strength = math.sin(pygame.time.get_ticks() * 0.001) * 0.5
         self.x += current_strength
 
         nearest_predator = None
@@ -269,7 +272,7 @@ class Fish:
         self.ready_to_mate = False
         partner.ready_to_mate = False
         
-        return Fish(self.x, self.y, 30, self.is_predator, child_genome)
+        return Fish(self.x, self.y, 30, child_genome)
     
     def draw(self, screen):
         if self.is_dead:
@@ -289,6 +292,103 @@ class Fish:
                         (int(tail_x), int(tail_y)), 2)
 
 
+class FishDetailsWindow:
+    def __init__(self, simulation: 'Simulation', fish: 'Fish') -> None:
+        def open_window():
+            self.simulation = simulation
+            self.fish = fish
+            self.simulation.paused = True
+            self.window = tk.Tk()
+
+            self.window.title("Fish Details")
+            self.window.geometry("530x570")
+            self.window.configure(bg='#242424')
+
+            left_frame = tk.Frame(self.window, bg='#242424')
+            left_frame.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.Y)
+
+            tk.Label(left_frame, 
+                    text=f"Energy: {int(self.fish.energy)}/{MAX_ENERGY}",
+                    font=("Arial", 12), bg='#242424', fg='#5E9F61'
+            ).pack(pady=5)
+
+            tk.Label(left_frame, 
+                    text=f"Age: {self.fish.age:.1f}",
+                    font=("Arial", 12), bg='#242424', fg='#5E9F61'
+            ).pack(pady=5)
+
+            tk.Label(left_frame, 
+                    text=f"Size: {self.fish.size:.1f}/{self.fish.max_size:.1f}",
+                    font=("Arial", 12), bg='#242424', fg='#5E9F61'
+            ).pack(pady=5)
+
+            tk.Label(left_frame, 
+                    text=f"Type: {'Predator' if self.fish.is_predator else 'Prey'}",
+                    font=("Arial", 12), bg='#242424', fg='#5E9F61'
+            ).pack(pady=5)
+
+            tk.Label(left_frame, 
+                    text=f"Ready to mate: {'Yes' if self.fish.ready_to_mate else 'No'}",
+                    font=("Arial", 12), bg='#242424', fg='#5E9F61'
+            ).pack(pady=5)
+
+            tk.Label(left_frame, 
+                    text=f"Status: {'Dead' if self.fish.is_dead else 'Alive'}",
+                    font=("Arial", 12), bg='#242424', fg='#5E9F61'
+            ).pack(pady=5)
+
+            right_frame = tk.Frame(self.window, bg='#242424')
+            right_frame.pack(side=tk.LEFT, padx=0, pady=10, fill=tk.BOTH, expand=True)
+
+            tk.Label(right_frame, 
+                    text="Genome:", 
+                    font=("Arial", 12, "bold"), 
+                    bg='#242424', 
+                    fg='#5E9F61'
+            ).pack(pady=5)
+
+            canvas = tk.Canvas(right_frame, 
+                             width=300, 
+                             height=520, 
+                             bg='#333333',
+                             highlightbackground='#424242', 
+                             highlightthickness=2
+            ) 
+            canvas.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+            self.draw_genome(canvas, self.fish.genome)
+
+            self.window.protocol("WM_DELETE_WINDOW", self.close_window)
+            self.window.mainloop()
+
+        Thread(target=open_window).start()
+
+    def draw_genome(self, canvas, genome):
+        y_pos = 20
+        for trait, values in genome.items():
+            canvas.create_text(20, y_pos, 
+                             text=f"{trait}:", 
+                             anchor="w", 
+                             fill="#5E9F61", 
+                             font=("Arial", 10))
+            
+            avg_value = sum(values) / 2
+            canvas.create_text(120, y_pos, 
+                             text=f"{avg_value:.2f}", 
+                             anchor="w", 
+                             fill="#5E9F61", 
+                             font=("Arial", 10))
+            
+            bar_width = int(avg_value * 100)
+            canvas.create_rectangle(200, y_pos-5, 200 + bar_width, y_pos+5, 
+                                  fill="#5E9F61", 
+                                  outline="")
+            
+            y_pos += 30
+
+    def close_window(self) -> None:
+        self.window.destroy()
+
 class EventHandler:
     def __init__(self, simulation: 'Simulation') -> None:
         self.simulation = simulation
@@ -296,11 +396,15 @@ class EventHandler:
     def handle_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                self.running = False
+                self.simulation.running = False
                 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_x, mouse_y = pygame.mouse.get_pos()
-                pass
+                for fish in self.simulation.fish_population:
+                    distance = math.hypot(fish.x - mouse_x, fish.y - mouse_y)
+                    if distance < fish.size + 5:
+                        FishDetailsWindow(self.simulation, fish)
+                        break
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
