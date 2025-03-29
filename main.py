@@ -27,7 +27,7 @@ class Food:
         self.lifetime -= 1 
 
 class Fish:
-    def __init__(self, x, y, energy, genome = None):
+    def __init__(self, x, y, energy, genome=None):
         self.x = x
         self.y = y
         self.energy = min(energy, MAX_ENERGY)
@@ -50,21 +50,23 @@ class Fish:
         
         self.is_predator = (sum(self.genome["predator"]) / 2) > 0.5
         
+        self.is_male = random.choice([True, False])
+        
         self.age = 0
         self.max_size = (sum(self.genome["size"]) / 2) * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
         
         if self.is_predator:
             self.speed = (sum(self.genome["speed"]) / 2) * 1.5 + 0.5
             self.size = 3
-            self.vision = (sum(self.genome["vision"]) / 2) * 100 + 50        # Зір для їжі/здобичі
-            self.mate_vision = (sum(self.genome["vision"]) / 2) * 150 + 75  # Більший зір для розмноження
+            self.vision = (sum(self.genome["vision"]) / 2) * 100 + 50
+            self.mate_vision = (sum(self.genome["vision"]) / 2) * 150 + 75
             self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.1
             self.energy_threshold = 40
         else:
             self.speed = (sum(self.genome["speed"]) / 2) * 2.5 + 1
             self.size = 2
-            self.vision = (sum(self.genome["vision"]) / 2) * 60 + 30         # Зір для їжі
-            self.mate_vision = (sum(self.genome["vision"]) / 2) * 80 + 40   # Більший зір для розмноження
+            self.vision = (sum(self.genome["vision"]) / 2) * 60 + 30
+            self.mate_vision = (sum(self.genome["vision"]) / 2) * 80 + 40
             self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.3
             self.energy_threshold = 20
         
@@ -73,17 +75,45 @@ class Fish:
         self.defense = sum(self.genome["defense"]) / 2
         self.preferred_depth = (sum(self.genome["preferred_depth"]) / 2) * HEIGHT
         
+        # Генетичні взаємодії
+        # Висока швидкість зменшує захист
+        self.defense *= (1 - sum(self.genome["speed"]) / 4)  # Швидкість зменшує захист до 25%
+        # Великий розмір погіршує маневреність
+        self.turn_speed = 0.1 if not self.is_predator else 0.08
+        self.turn_speed *= (1 - sum(self.genome["size"]) / 4)  # Розмір зменшує маневреність до 25%
+        
+        # Енергетичний штраф за надмірний розвиток (якщо середнє значення гена > 0.8)
+        self.energy_penalty = 0
+        for trait in ["speed", "size", "vision", "metabolism"]:
+            avg = sum(self.genome[trait]) / 2
+            if avg > 0.8:
+                self.energy_penalty += (avg - 0.8) * 0.5  # Штраф до витрат енергії
+        
+        # Епігенетика: адаптивний метаболізм
+        self.base_metabolism = self.metabolism
+        self.food_scarcity_timer = 0  
+        
+        # Статевий диморфізм: модифікація характеристик залежно від статі
+        if self.is_male:
+            # Самці яскравіші, але повільніші
+            self.color_modifier = 1.5
+            self.speed *= 0.9  # Зменшення швидкості на 10%
+        else:
+            # Самки краще маскуються
+            self.color_modifier = 0.7
+            self.defense *= 1.1  # Збільшення захисту на 10%
+        
         self.speed *= (1 - self.size / 20)
         self.speed += self.metabolism * 0.5
         
         self.color = (
-            max(0, min(255, int(self.genome["color"][0] * (100 if self.is_predator else 255)))),
-            max(0, min(255, int((100 + self.size * 10) * (0.5 if self.is_predator else 1)))),
-            max(0, min(255, int(self.genome["color"][1] * (100 if self.is_predator else 255))))
+            max(0, min(255, int(self.genome["color"][0] * (100 if self.is_predator else 255) * self.color_modifier))),
+            max(0, min(255, int((100 + self.size * 10) * (0.5 if self.is_predator else 1) * self.color_modifier))),
+            max(0, min(255, int(self.genome["color"][1] * (100 if self.is_predator else 255) * self.color_modifier)))
         )
+        
         self.direction = random.uniform(-math.pi/2, math.pi/2)
         self.ready_to_mate = False
-        self.turn_speed = 0.1 if not self.is_predator else 0.08
         self.tail_angle = 0
         self.tail_speed = 0.2
         self.is_dead = False
@@ -128,7 +158,6 @@ class Fish:
         self.grow()
 
         current_strength = (HEIGHT - self.y) / HEIGHT * 0.5
-        # current_strength = self.current_strength = math.sin(pygame.time.get_ticks() * 0.001) * 0.5
         self.x += current_strength
 
         nearest_predator = None
@@ -247,24 +276,29 @@ class Fish:
             self.ready_to_mate = self.energy > self.energy_threshold and random.random() < self.reproduction_rate
     
     def mate(self, partner):
-        if not partner or not self.ready_to_mate or not partner.ready_to_mate or self.is_predator != partner.is_predator or self.is_dead or partner.is_dead:
+        if (not partner or not self.ready_to_mate or not partner.ready_to_mate or 
+            self.is_predator != partner.is_predator or self.is_dead or partner.is_dead or 
+            self.is_male == partner.is_male):
             return None
         
         distance = math.hypot(self.x - partner.x, self.y - partner.y)
-        if distance > (self.size + partner.size) * 2:
-            return None
-        
-        if self.energy < 30 or partner.energy < 30:
+        if distance > (self.size + partner.size) * 2 or self.energy < 30 or partner.energy < 30:
             return None
         
         child_genome = {}
         for key in self.genome:
             self_allele = random.choice(self.genome[key])
             partner_allele = random.choice(partner.genome[key])
-            if random.random() < MUTATION_RATE:
-                self_allele = max(0, min(1, self_allele + random.uniform(-0.15, 0.15)))
-            if random.random() < MUTATION_RATE:
-                partner_allele = max(0, min(1, partner_allele + random.uniform(-0.15, 0.15)))
+            if key == "size":
+                if random.random() < MUTATION_RATE:
+                    self_allele = max(0.3, min(1, self_allele + random.uniform(-0.05, 0.05)))
+                if random.random() < MUTATION_RATE:
+                    partner_allele = max(0.3, min(1, partner_allele + random.uniform(-0.05, 0.05)))
+            else:
+                if random.random() < MUTATION_RATE:
+                    self_allele = max(0, min(1, self_allele + random.uniform(-0.15, 0.15)))
+                if random.random() < MUTATION_RATE:
+                    partner_allele = max(0, min(1, partner_allele + random.uniform(-0.15, 0.15)))
             child_genome[key] = [self_allele, partner_allele]
         
         self.energy -= 30
@@ -279,10 +313,16 @@ class Fish:
             pygame.draw.circle(screen, (100, 100, 100), (int(self.x), int(self.y)), int(self.size))
         else:
             if self.is_predator:
-                pygame.draw.circle(screen, (255, 0, 0), (int(self.x), int(self.y)), int(self.size) + 1, 1)
+                pygame.draw.circle(screen, (255, 0, 0), (int(self.x), int(self.y)), int(self.size) + 2, 1)
 
             if self.ready_to_mate:
-                pygame.draw.circle(screen, (255, 255, 0), (int(self.x), int(self.y)), int(self.size) + 2, 1)
+                pygame.draw.circle(screen, (255, 255, 0), (int(self.x), int(self.y)), int(self.size) + 3, 1)
+            
+            if self.is_male:
+                pygame.draw.circle(screen, (0, 0, 255), (int(self.x), int(self.y)), int(self.size) + 1, 2)
+            else:
+                pygame.draw.circle(screen, (0, 255, 0), (int(self.x), int(self.y)), int(self.size) + 1, 2)
+
             pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), int(self.size))
         self.tail_angle += self.tail_speed * self.speed if not self.is_dead else 0
         tail_offset = math.sin(self.tail_angle) * self.size * 0.3
@@ -312,13 +352,18 @@ class FishDetailsWindow:
                     font=("Arial", 12), bg='#242424', fg='#5E9F61'
             ).pack(pady=5)
 
-            tk.Label(left_frame, 
+            tk.Label(left_frame,
                     text=f"Age: {self.fish.age:.1f}",
                     font=("Arial", 12), bg='#242424', fg='#5E9F61'
             ).pack(pady=5)
 
             tk.Label(left_frame, 
                     text=f"Size: {self.fish.size:.1f}/{self.fish.max_size:.1f}",
+                    font=("Arial", 12), bg='#242424', fg='#5E9F61'
+            ).pack(pady=5)
+
+            tk.Label(left_frame, 
+                    text=f"Gender: {'Male' if self.fish.is_male else 'Female'}",
                     font=("Arial", 12), bg='#242424', fg='#5E9F61'
             ).pack(pady=5)
 
