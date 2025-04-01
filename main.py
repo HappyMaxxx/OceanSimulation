@@ -9,8 +9,9 @@ from settings import *
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Fish Evolution - Food Decay")
-font = pygame.font.Font(None, 36)
+font = pygame.font.Font(None, 24)
 clock = pygame.time.Clock()
+
 
 class Food:
     def __init__(self, x, y):
@@ -60,14 +61,14 @@ class Fish:
             self.size = 3
             self.vision = (sum(self.genome["vision"]) / 2) * 100 + 50
             self.mate_vision = (sum(self.genome["vision"]) / 2) * 150 + 75
-            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.1
+            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.25
             self.energy_threshold = 40
         else:
             self.speed = (sum(self.genome["speed"]) / 2) * 2.5 + 1
             self.size = 2
             self.vision = (sum(self.genome["vision"]) / 2) * 60 + 30
             self.mate_vision = (sum(self.genome["vision"]) / 2) * 80 + 40
-            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.3
+            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.45
             self.energy_threshold = 20
         
         self.metabolism = sum(self.genome["metabolism"]) / 2
@@ -97,11 +98,11 @@ class Fish:
         if self.is_male:
             # Самці яскравіші, але повільніші
             self.color_modifier = 1.5
-            self.speed *= 0.9  # Зменшення швидкості на 10%
+            self.speed *= 0.9
         else:
             # Самки краще маскуються
             self.color_modifier = 0.7
-            self.defense *= 1.1  # Збільшення захисту на 10%
+            self.defense *= 1.1
         
         self.speed *= (1 - self.size / 20)
         self.speed += self.metabolism * 0.5
@@ -118,7 +119,15 @@ class Fish:
         self.tail_speed = 0.2
         self.is_dead = False
         self.float_speed = 0.5
-    
+
+        base_lifespan = self.max_size * 4 
+        variation = random.uniform(0.8, 1.2)  
+        self.max_age = base_lifespan * variation * (1.2 if self.is_predator else 1.0)
+        
+        base_reproduction_age = self.max_size * 0.4
+        repro_variation = random.uniform(0.7, 1.3)  
+        self.min_reproduction_age = base_reproduction_age * repro_variation * (1.5 if self.is_predator else 1.0)
+
     def grow(self):
         if not self.is_dead and self.size < self.max_size:
             growth_rate = 0.01 * (self.energy / MAX_ENERGY) * (1 + self.metabolism)
@@ -134,7 +143,12 @@ class Fish:
     def find_nearest_prey(self, fish_list):
         if not fish_list:
             return None
-        potential_prey = [f for f in fish_list if f != self and (f.size + 3 < self.size or f.is_dead)]
+        
+        potential_prey = [f for f in fish_list if f != self and 
+                      (f.is_dead or
+                       (not f.is_predator) or 
+                       (f.is_predator and f.size + EAT_SIZE < self.size))]
+        
         if not potential_prey:
             return None
         return min(potential_prey, key=lambda f: math.hypot(f.x - self.x, f.y - self.y))
@@ -177,8 +191,12 @@ class Fish:
                 return
             return
 
-        self.age += 0.1
+        self.age += APT
         self.grow()
+
+        if self.age >= self.max_age and not self.is_dead:
+            self.is_dead = True
+            self.energy = max(self.energy, 10)
 
         current_strength = (HEIGHT - self.y) / HEIGHT * 0.5
         self.x += current_strength
@@ -186,12 +204,12 @@ class Fish:
         nearest_predator = None
         if predators:
             if self.is_predator:
-                bigger_predators = [p for p in predators if p.size > self.size and p != self]
+                bigger_predators = [p for p in predators if p.size > self.size + EAT_SIZE and p != self]
                 if bigger_predators:
                     nearest_predator = min(bigger_predators, key=lambda p: math.hypot(p.x - self.x, p.y - self.y))
             else:
                 nearest_predator = min(predators, key=lambda p: math.hypot(p.x - self.x, p.y - self.y), default=None)
-
+                
         if self.is_predator:
             if self.energy < MAX_ENERGY * 0.2:
                 target_depth = HEIGHT / 3 
@@ -289,7 +307,7 @@ class Fish:
             self.x = WIDTH + self.size
         self.y = max(self.size, min(HEIGHT - self.size, self.y))
 
-        energy_cost = self.speed * self.size * 0.01 * self.metabolism * (1 - self.defense * 0.5)
+        energy_cost = self.speed * self.size * 0.005 * self.metabolism * (1 - self.defense * 0.5)
         self.energy -= energy_cost
     
     def eat(self, food_list, fish_list):
@@ -298,14 +316,21 @@ class Fish:
         
         if self.is_predator:
             for prey in fish_list[:]:
-                if prey != self and (prey.size + 3 < self.size or prey.is_dead):
+                if prey != self:
                     distance = math.hypot(self.x - prey.x, self.y - prey.y)
                     if distance < self.size + prey.size:
-                        energy_gain = prey.energy * (0.5 + self.digestion * 0.5)
                         if prey.is_dead:
-                            energy_gain *= 0.7
-                        self.energy = min(MAX_ENERGY, self.energy + energy_gain)
-                        fish_list.remove(prey)
+                            energy_gain = prey.energy * (0.5 + self.digestion * 0.5) * 0.7
+                            self.energy = min(MAX_ENERGY, self.energy + energy_gain)
+                            fish_list.remove(prey)
+                        elif not prey.is_predator:
+                            energy_gain = prey.energy * (0.5 + self.digestion * 0.5)
+                            self.energy = min(MAX_ENERGY, self.energy + energy_gain)
+                            fish_list.remove(prey)
+                        elif prey.is_predator and prey.size + EAT_SIZE < self.size:
+                            energy_gain = prey.energy * (0.5 + self.digestion * 0.5)
+                            self.energy = min(MAX_ENERGY, self.energy + energy_gain)
+                            fish_list.remove(prey)
         else:
             for food in food_list[:]:
                 distance = math.hypot(self.x - food.x, self.y - food.y)
@@ -316,12 +341,14 @@ class Fish:
     
     def check_mating_readiness(self):
         if not self.is_dead:
-            self.ready_to_mate = self.energy > self.energy_threshold and random.random() < self.reproduction_rate
-    
+            self.ready_to_mate = (self.energy > self.energy_threshold and 
+                                  random.random() < self.reproduction_rate and 
+                                  self.age >= self.min_reproduction_age)
     def mate(self, partner):
         if (not partner or not self.ready_to_mate or not partner.ready_to_mate or 
             self.is_predator != partner.is_predator or self.is_dead or partner.is_dead or 
-            self.is_male == partner.is_male):
+            self.is_male == partner.is_male or 
+            self.age < self.min_reproduction_age or partner.age < partner.min_reproduction_age):
             return None
         
         distance = math.hypot(self.x - partner.x, self.y - partner.y)
@@ -395,8 +422,13 @@ class FishDetailsWindow:
                     font=("Arial", 12), bg='#242424', fg='#5E9F61'
             ).pack(pady=5)
 
-            tk.Label(left_frame,
-                    text=f"Age: {self.fish.age:.1f}",
+            tk.Label(left_frame, 
+                    text=f"Age: {self.fish.age:.1f}/{self.fish.max_age:.1f}",
+                    font=("Arial", 12), bg='#242424', fg='#5E9F61'
+            ).pack(pady=5)
+
+            tk.Label(left_frame, 
+                    text=f"Min Reproduction Age: {self.fish.min_reproduction_age:.1f}",
                     font=("Arial", 12), bg='#242424', fg='#5E9F61'
             ).pack(pady=5)
 
@@ -525,7 +557,7 @@ class Simulation:
 
             if not self.paused:
                 if random.random() < 0.05:
-                    if random.random() < 0.7:
+                    if random.random() < 0.8:
                         self.food_list.append(Food(random.randint(0, WIDTH), random.randint(int(HEIGHT/2), HEIGHT)))
                     else:
                         self.food_list.append(Food(random.randint(0, WIDTH), random.randint(0, int(HEIGHT/2))))
@@ -567,13 +599,20 @@ class Simulation:
             for fish in self.fish_population:
                 fish.draw(screen)
             
-            predators = len([f for f in self.fish_population if f.is_predator and not f.is_dead])
-            stats = font.render(f"Fish: {len([f for f in self.fish_population if not f.is_dead])} Predators: {predators}  Food: {len(self.food_list)}",
-                              True, (255, 255, 255))
+            predators = [f for f in self.fish_population if f.is_predator and not f.is_dead]
+            prey = [f for f in self.fish_population if not f.is_predator and not f.is_dead]
+
+            stats = font.render(f"Fish: {len([f for f in self.fish_population if not f.is_dead])} Food: {len(self.food_list)}",
+                                True, (255, 255, 255))
             screen.blit(stats, (10, 10))
-            gender_stats = font.render(f"Male: {len([f for f in self.fish_population if f.is_male and not f.is_dead])} Female: {len([f for f in self.fish_population if not f.is_male and not f.is_dead])}",
-                              True, (255, 255, 255))
-            screen.blit(gender_stats, (10, 40))
+
+            prey_gender_stats = font.render(f"Prey ({len(prey)}) - Male: {len([f for f in prey if f.is_male])} Female: {len([f for f in prey if not f.is_male])}",
+                                            True, (255, 255, 255))
+            screen.blit(prey_gender_stats, (10, 40))
+
+            predator_gender_stats = font.render(f"Predators ({len(predators)}) - Male: {len([f for f in predators if f.is_male])} Female: {len([f for f in predators if not f.is_male])}",
+                                                True, (255, 255, 255))
+            screen.blit(predator_gender_stats, (10, 70))
             
             if self.paused:
                 pause_text = font.render("PAUSED", True, (255, 255, 255))
