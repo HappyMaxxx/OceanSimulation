@@ -143,116 +143,140 @@ class Fish:
         self.x = x
         self.y = y
         self.energy = min(energy, MAX_ENERGY)
+        self.size = 1.0
         
+        # Ініціалізація геному з домінантністю
         if genome is None:
             self.genome = {
-                "speed": [random.uniform(0, 1), random.uniform(0, 1)],
-                "size": [random.uniform(0, 1), random.uniform(0, 1)],
-                "vision": [random.uniform(0, 1), random.uniform(0, 1)],
-                "metabolism": [random.uniform(0, 1), random.uniform(0, 1)],
-                "digestion": [random.uniform(0, 1), random.uniform(0, 1)],
-                "reproduction": [random.uniform(0, 1), random.uniform(0, 1)],
-                "defense": [random.uniform(0, 1), random.uniform(0, 1)],
-                "color": [random.uniform(0, 1), random.uniform(0, 1)],
-                "preferred_depth": [random.uniform(0, 1), random.uniform(0, 1)],
-                "predator": [random.uniform(0, 1), random.uniform(0, 1)]
+                "speed": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "size": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "vision": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "metabolism": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "digestion": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "reproduction": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "defense": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "color": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "preferred_depth": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
+                "predator": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])}
             }
         else:
             self.genome = genome
         
-        self.is_predator = (sum(self.genome["predator"]) / 2) > 0.5
-        
+        # Визначення статі та базових характеристик
         self.is_male = random.choice([True, False])
-        
+        self.is_predator = None  # Буде визначено в calculate_traits
         self.age = 0
-        self.max_size = (sum(self.genome["size"]) / 2) * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
         
-        if self.is_predator:
-            self.speed = (sum(self.genome["speed"]) / 2) * 1.5 + 0.5
-            self.size = 3
-            self.vision = (sum(self.genome["vision"]) / 2) * 100 + 50
-            self.mate_vision = (sum(self.genome["vision"]) / 2) * 150 + 75
-            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.25
-            self.energy_threshold = 40
-        else:
-            self.speed = (sum(self.genome["speed"]) / 2) * 2.5 + 1
-            self.size = 2
-            self.vision = (sum(self.genome["vision"]) / 2) * 60 + 30
-            self.mate_vision = (sum(self.genome["vision"]) / 2) * 80 + 40
-            self.reproduction_rate = (sum(self.genome["reproduction"]) / 2) * 0.45
-            self.energy_threshold = 20
+        # Обчислення фенотипічних рис
+        self.calculate_traits()
         
-        self.metabolism = sum(self.genome["metabolism"]) / 2
-        self.digestion = sum(self.genome["digestion"]) / 2
-        self.defense = sum(self.genome["defense"]) / 2
-        self.preferred_depth = (sum(self.genome["preferred_depth"]) / 2) * (HEIGHT - 2 * self.max_size) + self.max_size
-        self.preferred_depth_range = 50
+        self.energy_threshold = 40 if self.is_predator else 20
+        self.mate_vision = self.vision * 1.5  # Зір для пошуку партнера
+        self.ready_to_mate = False
+        self.is_dead = False
+        # self.float_speed = ((7 / (self.size * 2 + 0.5)) * 1.4 + 0.2) / 5
+        self.float_speed = 1.5 / (1 + self.size)
         
-        # Генетичні взаємодії
-        # Висока швидкість зменшує захист
-        self.defense *= (1 - sum(self.genome["speed"]) / 4)  # Швидкість зменшує захист до 25%
-        self.speed *= (1 - self.defense * 0.3)  # Високий захист зменшує швидкість до 30%
-        self.max_size *= (1 - self.defense * 0.2) # Високий захист зменшує максимальний розмір до 20%
-
-        # Великий розмір погіршує маневреність
-        self.turn_speed = 0.1 if not self.is_predator else 0.08
-        self.turn_speed *= (1 - sum(self.genome["size"]) / 4)  # Розмір зменшує маневреність до 25%
-        
-        # Енергетичний штраф за надмірний розвиток (якщо середнє значення гена > 0.8)
-        self.energy_penalty = 0
-        for trait in ["speed", "size", "vision", "metabolism"]:
-            avg = sum(self.genome[trait]) / 2
-            if avg > 0.8:
-                self.energy_penalty += (avg - 0.8) * 0.5  # Штраф до витрат енергії
-        
-        # Епігенетика: адаптивний метаболізм
-        self.base_metabolism = self.metabolism
-        self.food_scarcity_timer = 0  
-        
-        # Статевий диморфізм: модифікація характеристик залежно від статі
+        # Статевий диморфізм
         if self.is_male:
-            # Самці яскравіші, але повільніші
-            self.color_modifier = 1.5
-            self.speed *= 0.9 
+            self.color_modifier = 1.5  # Самці яскравіші
+            self.speed *= 0.9  # Але повільніші
         else:
-            # Самки краще маскуються
-            self.color_modifier = 0.7
+            self.color_modifier = 0.7  # Самки краще маскуються
             self.defense *= 1.1
         
-        self.defense *= (0.8 + self.digestion * 0.2)  # Низьке травлення зменшує захист до 20%
-        # Витрати енергії на підтримку захисту
-        self.defense_cost = self.defense * 0.05
-
-        self.speed *= (1 - self.size / 20)
-        self.speed += self.metabolism * 0.5
-        
+        # Колір риби
         self.color = (
-            max(0, min(255, int(self.genome["color"][0] * (100 if self.is_predator else 255) * self.color_modifier))),
+            max(0, min(255, int(self.genome["color"]["alleles"][0] * (100 if self.is_predator else 255) * self.color_modifier))),
             max(0, min(255, int((100 + self.size * 10) * (0.5 if self.is_predator else 1) * self.color_modifier))),
-            max(0, min(255, int(self.genome["color"][1] * (100 if self.is_predator else 255) * self.color_modifier)))
+            max(0, min(255, int(self.genome["color"]["alleles"][1] * (100 if self.is_predator else 255) * self.color_modifier)))
         )
         
+        # Рухові характеристики
         self.direction = random.uniform(-math.pi/2, math.pi/2)
-        self.ready_to_mate = False
         self.tail_angle = 0
         self.tail_speed = 0.2
-        self.is_dead = False
-        self.float_speed = (0.4 * (10 / (self.size + 0.5))) / 8
-
+        
+        # Епігенетичні змінні
+        self.food_scarcity_timer = 0
+        self.base_metabolism = self.metabolism
+        
+        # Тривалість життя та репродукція
         base_lifespan = self.max_size * 4
         variation = random.uniform(0.8, 1.2)
         self.max_age = base_lifespan * variation * (1.2 if self.is_predator else 1.0) * (1 - self.metabolism * 0.3)
         
         base_reproduction_age = self.max_size * 0.4
-        repro_variation = random.uniform(0.7, 1.3)  
+        repro_variation = random.uniform(0.7, 1.3)
         self.min_reproduction_age = base_reproduction_age * repro_variation * (1.5 if self.is_predator else 1.0)
+    
+    def calculate_traits(self):
+        def get_phenotype(trait):
+            alleles = self.genome[trait]["alleles"]
+            dom = self.genome[trait]["dominance"]
+            if dom == 0:
+                return alleles[0] * 0.75 + alleles[1] * 0.25
+            else:
+                return alleles[1] * 0.75 + alleles[0] * 0.25
+
+        self.is_predator = get_phenotype("predator") > 0.5
+        self.speed = get_phenotype("speed") * (1.5 if self.is_predator else 2.5)
+        # Обчислюємо максимальний розмір
+        self.max_size = get_phenotype("size") * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
+        self.vision = get_phenotype("vision") * (100 if self.is_predator else 60) + (50 if self.is_predator else 30)
+        self.metabolism = get_phenotype("metabolism")
+        self.digestion = get_phenotype("digestion")
+        self.reproduction_rate = get_phenotype("reproduction") * (0.25 if self.is_predator else 0.45)
+        self.defense = get_phenotype("defense")
+        self.preferred_depth = get_phenotype("preferred_depth") * (HEIGHT - 2 * self.max_size) + self.max_size
+        self.turn_speed = 0.1 if not self.is_predator else 0.08
+        self.preferred_depth_range = 50
+
+        # Плейотропні ефекти
+        self.metabolism += (self.max_size / 20)
+        self.metabolism = min(1.0, self.metabolism)
+        self.defense *= (1 - get_phenotype("speed") * 0.4)
+        self.speed *= (1 - self.defense * 0.3)
+        self.max_size = self.max_size * (1 - self.defense * 0.2)  # Оновлюємо max_size
+        self.turn_speed *= (1 - get_phenotype("size") * 0.25)
+        self.metabolism += get_phenotype("vision") * 0.2
+        self.metabolism = min(1.0, self.metabolism)
+
+        self.energy_penalty = 0
+        for trait in ["speed", "size", "vision"]:
+            if get_phenotype(trait) > 0.8:
+                self.energy_penalty += (get_phenotype(trait) - 0.8) * 0.5
+
+        self.defense_cost = self.defense * 0.05
+
+    def update_epigenetics(self, food_availability):
+        if food_availability < 0.3:
+            self.food_scarcity_timer += 1
+            if self.food_scarcity_timer > 50: 
+                self.metabolism = max(0.3, self.metabolism * 0.95) 
+                self.digestion = min(1.0, self.digestion * 1.05) 
+        else:
+            self.food_scarcity_timer = max(0, self.food_scarcity_timer - 1)
+            self.metabolism = min(1.0, self.metabolism * 1.01) 
 
     def grow(self):
         if not self.is_dead and self.size < self.max_size:
-            growth_rate = 0.01 * (self.energy / MAX_ENERGY) * (1 + self.metabolism) * (0.5 + self.digestion * 0.5)
+            def get_phenotype(trait):
+                alleles = self.genome[trait]["alleles"]
+                dom = self.genome[trait]["dominance"]
+                if dom == 0:
+                    return alleles[0] * 0.75 + alleles[1] * 0.25
+                else:
+                    return alleles[1] * 0.75 + alleles[0] * 0.25
+
+            metabolism_phenotype = get_phenotype("metabolism")
+            digestion_phenotype = get_phenotype("digestion")
+            speed_phenotype = get_phenotype("speed")
+
+            growth_rate = 0.1 * (self.energy / MAX_ENERGY) * (1 + metabolism_phenotype) * (0.5 + digestion_phenotype * 0.5)
             self.size = min(self.max_size, self.size + growth_rate)
-            self.speed = ((sum(self.genome["speed"]) / 2) * (1.5 if self.is_predator else 2.5) + 
-                         (0.5 if self.is_predator else 1)) * (1 - self.size / 20) + self.metabolism * 0.5
+            self.speed = (speed_phenotype * (1.5 if self.is_predator else 2.5) + 
+                        (0.5 if self.is_predator else 1)) * (1 - self.size / 20) + metabolism_phenotype * 0.5
     
     def find_nearest_food(self, algae_list, plankton_list, crustacean_list, dead_algae_parts):
         effective_vision = self.vision * (0.7 if self.is_in_algae(algae_list) else 1)  # Зменшення видимості у водоростях
@@ -316,7 +340,7 @@ class Fish:
             return None
         
         effective_mate_vision = self.mate_vision * (0.7 if self.is_in_algae(algae_list) else 1)  # Зменшення видимості у водоростях
-        potential_mates = [f for f in fish_list if f != self and f.ready_to_mate and f.is_predator == self.is_predator and f.is_mate != self.is_mate]
+        potential_mates = [f for f in fish_list if f != self and f.ready_to_mate and f.is_predator == self.is_predator and f.is_male != self.is_male]
         
         if not potential_mates:
             return None
@@ -343,10 +367,11 @@ class Fish:
             direction_x = (self.x - other_fish.x) / distance
             direction_y = (self.y - other_fish.y) / distance
             
-            self.x += direction_x * overlap * OVERLAP_THRESHOLD
-            self.y += direction_y * overlap * OVERLAP_THRESHOLD
-            other_fish.x -= direction_x * overlap * OVERLAP_THRESHOLD
-            other_fish.y -= direction_y * overlap * OVERLAP_THRESHOLD
+            correction = overlap * OVERLAP_THRESHOLD * 0.8
+            self.x += direction_x * correction
+            self.y += direction_y * correction
+            other_fish.x -= direction_x * correction
+            other_fish.y -= direction_y * correction
             
             self.direction = math.atan2(direction_y, direction_x)
             other_fish.direction = math.atan2(-direction_y, -direction_x)
@@ -359,16 +384,20 @@ class Fish:
                     return True
         return False
 
-    def move(self, algae_list=None, target_prey=None, target_mate=None, target_food=None, predators=None, fish_list=None):
+    def move(self, algae_list=None, crustacean_list=None, target_prey=None,
+             target_mate=None, target_food=None, predators=None, fish_list=None):
 
         if self.is_dead:
-            self.y -= self.float_speed
+            self.y -= self.float_speed - self.size * 0.01
             if self.y <= 0:
                 return
             return
 
         self.age += APT
         self.grow()
+
+        food_availability = len(algae_list) / MAX_ALGAE if not self.is_predator else len(crustacean_list) / INITIAL_CRUSTACEANS
+        self.update_epigenetics(food_availability)
 
         if self.age >= self.max_age and not self.is_dead:
             self.is_dead = True
@@ -393,9 +422,8 @@ class Fish:
         # Пріоритети дій:
         # 1. Втеча від хижака
         # 2. Розмноження (якщо готові)
-        # 3. Адаптація глибини (для хижаків з низькою енергією, якщо немає цілей)
-        # 4. Полювання/пошук їжі
-        # 5. Випадковий рух у спокої або рух до preferred_depth
+        # 3. Полювання/пошук їжі
+        # 4. Випадковий рух у спокої або рух до preferred_depth
 
         if nearest_predator and math.hypot(nearest_predator.x - self.x, nearest_predator.y - self.y) < effective_vision * 1.5:
             desired_angle = math.atan2(self.y - nearest_predator.y, self.x - nearest_predator.x)
@@ -422,16 +450,6 @@ class Fish:
             self.x += math.cos(self.direction) * effective_speed
             self.y += math.sin(self.direction) * effective_speed
 
-        elif (self.is_predator and self.energy < MAX_ENERGY * 0.2 and not (target_prey or target_food)):
-            desired_angle = math.atan2(self.preferred_depth - self.y, 10)
-            angle_diff = desired_angle - self.direction
-            angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
-            if abs(angle_diff) > self.turn_speed / 2:
-                self.direction += (self.turn_speed / 2) if angle_diff > 0 else -(self.turn_speed / 2)
-            self.direction = max(-math.pi/2, min(math.pi/2, self.direction))
-            self.x += math.cos(self.direction) * effective_speed
-            self.y += math.sin(self.direction) * effective_speed
-
         elif self.is_predator and (target_prey or target_food) and self.energy < MAX_ENERGY * 0.95:
             target = target_prey if target_prey else target_food
 
@@ -446,6 +464,16 @@ class Fish:
                 self.direction = self.direction % (2 * math.pi)
                 self.x += math.cos(self.direction) * effective_speed
                 self.y += math.sin(self.direction) * effective_speed
+        
+        elif (self.is_predator and self.energy < MAX_ENERGY * 0.2 and not (target_prey or target_food)):
+            desired_angle = math.atan2(self.preferred_depth - self.y, 10)
+            angle_diff = desired_angle - self.direction
+            angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
+            if abs(angle_diff) > self.turn_speed / 2:
+                self.direction += (self.turn_speed / 2) if angle_diff > 0 else -(self.turn_speed / 2)
+            self.direction = max(-math.pi/2, min(math.pi/2, self.direction))
+            self.x += math.cos(self.direction) * effective_speed
+            self.y += math.sin(self.direction) * effective_speed
 
         elif not self.is_predator and target_food and self.energy < MAX_ENERGY * 0.95:
             if isinstance(target_food, tuple):
@@ -597,23 +625,33 @@ class Fish:
         
         child_genome = {}
         for key in self.genome:
-            self_allele = random.choice(self.genome[key])
-            partner_allele = random.choice(partner.genome[key])
-            if key == 'predator':
-                if random.random() < MUTATION_RATE:
-                    self_allele = max(0, min(1, self_allele + random.uniform(-0.05, 0.05)))
-                if random.random() < MUTATION_RATE:
-                    partner_allele = max(0, min(1, partner_allele + random.uniform(-0.05, 0.05)))
+            self_alleles = self.genome[key]["alleles"]
+            partner_alleles = partner.genome[key]["alleles"]
+            self_dom = self.genome[key]["dominance"]
+            partner_dom = partner.genome[key]["dominance"]
+            
+            if random.random() < 0.7:
+                self_allele = self_alleles[self_dom]
             else:
-                if random.random() < MUTATION_RATE:
-                    self_allele = max(0, min(1, self_allele + random.uniform(-0.15, 0.15)))
-                if random.random() < MUTATION_RATE:
-                    partner_allele = max(0, min(1, partner_allele + random.uniform(-0.15, 0.15)))
-            child_genome[key] = [self_allele, partner_allele]
+                self_allele = random.choice(self_alleles)
+            if random.random() < 0.7:
+                partner_allele = partner_alleles[partner_dom]
+            else:
+                partner_allele = random.choice(partner_alleles)
+            
+            mutation_range = 0.05 if key == 'predator' else 0.15
+            if random.random() < MUTATION_RATE:
+                self_allele = max(0, min(1, self_allele + random.uniform(-mutation_range, mutation_range)))
+            if random.random() < MUTATION_RATE:
+                partner_allele = max(0, min(1, partner_allele + random.uniform(-mutation_range, mutation_range)))
+            
+            child_genome[key] = {
+                "alleles": [self_allele, partner_allele],
+                "dominance": random.choice([0, 1])
+            }
         
         energy_cost = 30 * (1 + self.metabolism * 0.5)
         self.energy -= energy_cost
-        energy_cost = 30 * (1 + partner.metabolism * 0.5)
         partner.energy -= energy_cost
         self.ready_to_mate = False
         partner.ready_to_mate = False
@@ -682,7 +720,7 @@ class FishDetailsWindow:
             self.window = tk.Tk()
 
             self.window.title("Fish Details")
-            self.window.geometry("530x570")
+            self.window.geometry("660x570")
             self.window.configure(bg='#242424')
 
             left_frame = tk.Frame(self.window, bg='#242424')
@@ -756,22 +794,41 @@ class FishDetailsWindow:
 
     def draw_genome(self, canvas, genome):
         y_pos = 20
-        for trait, values in genome.items():
+        for trait, data in genome.items():
+            alleles = data["alleles"]
+            dom = data["dominance"]
+            dominant_allele = alleles[dom]
+            recessive_allele = alleles[1 - dom]
+            phenotype = dominant_allele * 0.75 + recessive_allele * 0.25  # Неповна домінантність
+
+            if trait == 'preferred_depth':
+                trait = 'pred_depth'
+
             canvas.create_text(20, y_pos, 
                              text=f"{trait}:", 
                              anchor="w", 
                              fill="#5E9F61", 
                              font=("Arial", 10))
             
-            avg_value = sum(values) / 2
-            canvas.create_text(120, y_pos, 
-                             text=f"{avg_value:.2f}", 
+            canvas.create_text(100, y_pos, 
+                             text=f"A1: {alleles[0]:.2f}{' (D)' if dom == 0 else ''}", 
+                             anchor="w", 
+                             fill="#5E9F61", 
+                             font=("Arial", 10))
+            canvas.create_text(180, y_pos, 
+                             text=f"A2: {alleles[1]:.2f}{' (D)' if dom == 1 else ''}", 
                              anchor="w", 
                              fill="#5E9F61", 
                              font=("Arial", 10))
             
-            bar_width = int(avg_value * 100)
-            canvas.create_rectangle(200, y_pos-5, 200 + bar_width, y_pos+5, 
+            canvas.create_text(260, y_pos, 
+                             text=f"{phenotype:.2f}", 
+                             anchor="w", 
+                             fill="#5E9F61", 
+                             font=("Arial", 10))
+            
+            bar_width = int(phenotype * 100)
+            canvas.create_rectangle(320, y_pos-5, 320 + bar_width, y_pos+5, 
                                   fill="#5E9F61", 
                                   outline="")
             
@@ -919,7 +976,7 @@ class Simulation:
                     nearest_food = fish.find_nearest_food(self.algae_list, self.plankton_list, self.crustacean_list, self.dead_algae_parts) if not fish.is_dead else None
                     predators = [f for f in self.fish_population if f.is_predator and not f.is_dead]  # Локальний список хижаків
 
-                    fish.move(self.algae_list, nearest_prey, nearest_mate, nearest_food, predators, self.fish_population)
+                    fish.move(self.algae_list, self.crustacean_list, nearest_prey, nearest_mate, nearest_food, predators, self.fish_population)
                     fish.eat(self.algae_list, self.plankton_list, self.crustacean_list, self.dead_algae_parts, self.fish_population)
                     
                     if fish.ready_to_mate and nearest_mate:
@@ -928,7 +985,7 @@ class Simulation:
                     
                     if fish.energy <= 0 and not fish.is_dead:
                         fish.is_dead = True
-                        fish.energy = random.randint(5, 15)
+                        fish.energy = random.randint(5, 15) + fish.size * 0.5
                     
                     if fish.is_dead and fish.y <= 0:
                         self.fish_population.remove(fish)
