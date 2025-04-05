@@ -9,7 +9,6 @@ from settings import *
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Fish Evolution - Food Decay")
-font = pygame.font.Font(None, 24)
 clock = pygame.time.Clock()
 
 
@@ -20,7 +19,7 @@ class Algae:
         self.segments = [(x, base_y)]
         self.lowest_y = base_y 
         self.energy_value = 7
-        self.growth_timer = random.randint(50, 100)
+        self.growth_timer = random.randint(ALGAE_GROW[0], ALGAE_GROW[1])
         self.max_height = random.randint(int(HEIGHT * 0.3), int(HEIGHT * 0.5))
         self.branch_chance = 0.1
         self.is_alive = True
@@ -54,7 +53,7 @@ class Algae:
             if branch_y < self.lowest_y:
                 self.lowest_y = branch_y  
 
-        self.growth_timer = random.randint(100, 150)
+        self.growth_timer = random.randint(ALGAE_GROW[0], ALGAE_GROW[1])
 
     def check_root(self):
         return any(seg[1] >= self.base_y - 3 for seg in self.segments)
@@ -94,7 +93,7 @@ class DeadAlgaePart:
         self.y = y
         self.energy_value = random.randint(2, 5) 
         self.float_speed = random.uniform(0.2, 0.5)  
-        self.lifetime = random.randint(500, 800)  
+        self.lifetime = random.randint(DEAD_ALGAE_LIFETIME[0], DEAD_ALGAE_LIFETIME[1])  
 
     def update(self):
         self.y -= self.float_speed 
@@ -111,7 +110,7 @@ class Crustacean:
         self.energy_value = random.randint(25, 40)
         self.speed = random.uniform(0.5, 1.0)
         self.direction = random.uniform(0, 2 * math.pi)
-        self.lifetime = random.randint(300, 500) 
+        self.lifetime = random.randint(CRUSTACEAN_LIFETIME[0], CRUSTACEAN_LIFETIME[1]) 
 
     def update(self):
         self.x += math.cos(self.direction) * self.speed
@@ -130,7 +129,7 @@ class Plankton:
         self.x = x
         self.y = y
         self.energy_value = random.randint(3, 7)  
-        self.lifetime = random.randint(150, 200)  
+        self.lifetime = random.randint(PLANKTON_LIFETIME[0], PLANKTON_LIFETIME[1])  
 
     def update(self):
         self.lifetime -= 1
@@ -238,7 +237,7 @@ class Fish:
         self.tail_angle = 0
         self.tail_speed = 0.2
         self.is_dead = False
-        self.float_speed = 0.5
+        self.float_speed = (0.4 * (10 / (self.size + 0.5))) / 8
 
         base_lifespan = self.max_size * 4
         variation = random.uniform(0.8, 1.2)
@@ -317,7 +316,7 @@ class Fish:
             return None
         
         effective_mate_vision = self.mate_vision * (0.7 if self.is_in_algae(algae_list) else 1)  # Зменшення видимості у водоростях
-        potential_mates = [f for f in fish_list if f != self and f.ready_to_mate and f.is_predator == self.is_predator]
+        potential_mates = [f for f in fish_list if f != self and f.ready_to_mate and f.is_predator == self.is_predator and f.is_mate != self.is_mate]
         
         if not potential_mates:
             return None
@@ -614,6 +613,7 @@ class Fish:
         
         energy_cost = 30 * (1 + self.metabolism * 0.5)
         self.energy -= energy_cost
+        energy_cost = 30 * (1 + partner.metabolism * 0.5)
         partner.energy -= energy_cost
         self.ready_to_mate = False
         partner.ready_to_mate = False
@@ -641,18 +641,18 @@ class Fish:
         # Відображення ліній до цілей
         if show_targets and not self.is_dead and self.energy < MAX_ENERGY * 0.95:
             if self.is_predator and nearest_prey and math.hypot(nearest_prey.x - self.x, nearest_prey.y - self.y) < self.vision:
-                pygame.draw.line(screen, (255, 0, 0), (int(self.x), int(self.y)), (int(nearest_prey.x), int(nearest_prey.y)), 2)
+                pygame.draw.line(screen, (255, 0, 0), (int(self.x), int(self.y)), (int(nearest_prey.x), int(nearest_prey.y)))
             elif self.is_predator and nearest_food and math.hypot(nearest_food.x - self.x, nearest_food.y - self.y) < self.vision:
-                pygame.draw.line(screen, (255, 0, 0), (int(self.x), int(self.y)), (int(nearest_food.x), int(nearest_food.y)), 2)
+                pygame.draw.line(screen, (255, 0, 0), (int(self.x), int(self.y)), (int(nearest_food.x), int(nearest_food.y)))
             elif not self.is_predator and nearest_food:
                 if isinstance(nearest_food, tuple):
                     _, (target_x, target_y) = nearest_food
                 else: 
                     target_x, target_y = nearest_food.x, nearest_food.y
                 if math.hypot(target_x - self.x, target_y - self.y) < self.vision:
-                    pygame.draw.line(screen, (0, 255, 0), (int(self.x), int(self.y)), (int(target_x), int(target_y)), 2)
+                    pygame.draw.line(screen, (0, 255, 0), (int(self.x), int(self.y)), (int(target_x), int(target_y)))
             elif nearest_mate and self.ready_to_mate and math.hypot(nearest_mate.x - self.x, nearest_mate.y - self.y) < self.mate_vision:
-                pygame.draw.line(screen, (255, 255, 0), (int(self.x), int(self.y)), (int(nearest_mate.x), int(nearest_mate.y)), 2)
+                pygame.draw.line(screen, (255, 255, 0), (int(self.x), int(self.y)), (int(nearest_mate.x), int(nearest_mate.y)))
 
         if self.is_dead:
             pygame.draw.circle(screen, (100, 100, 100), (int(self.x), int(self.y)), int(self.size))
@@ -780,6 +780,7 @@ class FishDetailsWindow:
     def close_window(self) -> None:
         self.window.destroy()
 
+
 class EventHandler:
     def __init__(self, simulation: 'Simulation') -> None:
         self.simulation = simulation
@@ -800,15 +801,74 @@ class EventHandler:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     self.simulation.paused = not self.simulation.paused
+
                 elif event.key == pygame.K_v or event.unicode.lower() == "м":
+                    if not self.simulation.show_vision:
+                        self.simulation.active_modes.append("Vision") 
+                    else:
+                        self.simulation.active_modes.remove("Vision")
+
                     self.simulation.show_vision = not self.simulation.show_vision
+
                 elif event.key == pygame.K_c or event.unicode.lower() == "с":
+                    if not self.simulation.show_targets:
+                        self.simulation.active_modes.append("Targets")
+                    else:
+                        self.simulation.active_modes.remove("Targets")
+
                     self.simulation.show_targets = not self.simulation.show_targets
+
+
+class UI:
+    def __init__(self, simulation: 'Simulation') -> None:
+        self.simulation = simulation
+        self.font = pygame.font.Font(None, 24)
+
+    def draw_statistic(self):
+        predators = [f for f in self.simulation.fish_population if f.is_predator and not f.is_dead]
+        prey = [f for f in self.simulation.fish_population if not f.is_predator and not f.is_dead]
+
+        stats = self.font.render(f"Fish: {len([f for f in self.simulation.fish_population if not f.is_dead])} "
+                            f"Algae: {len(self.simulation.algae_list)} Plankton: {len(self.simulation.plankton_list)} "
+                            f"Crustaceans: {len(self.simulation.crustacean_list)} Dead Parts: {len(self.simulation.dead_algae_parts)}", 
+                            True, (255, 255, 255))
+        screen.blit(stats, (10, 10))
+
+        prey_gender_stats = self.font.render(f"Prey ({len(prey)}) - Male: {len([f for f in prey if f.is_male])} Female: {len([f for f in prey if not f.is_male])}",
+                                        True, (255, 255, 255))
+        screen.blit(prey_gender_stats, (10, 30))
+
+        predator_gender_stats = self.font.render(f"Predators ({len(predators)}) - Male: {len([f for f in predators if f.is_male])} Female: {len([f for f in predators if not f.is_male])}",
+                                            True, (255, 255, 255))
+        screen.blit(predator_gender_stats, (10, 50))
+        
+        if self.simulation.paused:
+            pause_text = self.font.render("PAUSED", True, (255, 255, 255))
+            screen.blit(pause_text, (WIDTH//2 - pause_text.get_width()//2, HEIGHT//2 - pause_text.get_height()//2))
+    
+    def draw_active_modes(self):
+        x_pos = WIDTH - 100 
+        y_pos = 10  
+
+        for mode in self.simulation.active_modes:
+            if mode == "Vision":
+                mode_text = self.font.render("Vision", True, (255, 255, 255))
+            elif mode == "Targets":
+                mode_text = self.font.render("Targets", True, (255, 255, 255))
+            screen.blit(mode_text, (x_pos, y_pos))
+            y_pos += 20
+
+    def draw(self):
+        self.draw_statistic()
+        self.draw_active_modes()
 
 
 class Simulation:
     def __init__(self):
-        self.fish_population = [Fish(random.randint(0, WIDTH), random.randint(0, HEIGHT), 50)
+        self.event_handler = EventHandler(self)
+        self.ui = UI(self)
+
+        self.fish_population = [Fish(random.randint(0, WIDTH), random.randint(0, HEIGHT), random.randint(40, 60))
                                 for _ in range(NUM_FISH)]
         self.algae_list = [Algae(random.randint(0, WIDTH), HEIGHT)
                            for _ in range(INITIAL_ALGAE)]
@@ -820,9 +880,10 @@ class Simulation:
         self.running = True
         self.paused = False
         self.background = self.create_background(WIDTH, HEIGHT)
-        self.event_handler = EventHandler(self)
+
         self.show_vision = False
         self.show_targets = False
+        self.active_modes = []
 
     @staticmethod
     def create_background(width, height):
@@ -840,7 +901,6 @@ class Simulation:
             self.event_handler.handle_events()
 
             if not self.paused:
-                # Генерація нових об'єктів
                 if random.random() < 0.3:
                     if random.random() < 0.1:
                         new_x = random.randint(0, WIDTH)
@@ -851,7 +911,7 @@ class Simulation:
                         self.crustacean_list.append(Crustacean(random.randint(0, WIDTH), random.randint(int(HEIGHT / 3), HEIGHT)))
 
                 new_fish = []
-                for fish in self.fish_population[:]:  # Використовуємо копію списку
+                for fish in self.fish_population[:]:
                     fish.check_mating_readiness()
 
                     nearest_prey = fish.find_nearest_prey(self.fish_population, self.algae_list) if fish.is_predator and not fish.is_dead else None
@@ -870,13 +930,11 @@ class Simulation:
                         fish.is_dead = True
                         fish.energy = random.randint(5, 15)
                     
-                    # Видаляємо мертвих риб, які спливли до поверхні
                     if fish.is_dead and fish.y <= 0:
                         self.fish_population.remove(fish)
 
                 self.fish_population.extend(new_fish)
 
-                # Оновлення інших об'єктів із прямим видаленням
                 for algae in self.algae_list[:]:
                     algae.update(self.algae_list, self.dead_algae_parts)
                     if not algae.segments:
@@ -897,7 +955,6 @@ class Simulation:
                     if dead_part.lifetime <= 0 or dead_part.y <= 0:
                         self.dead_algae_parts.remove(dead_part)
 
-            # Малювання всіх об'єктів
             for algae in self.algae_list:
                 algae.draw(screen)
             for crust in self.crustacean_list:
@@ -908,33 +965,16 @@ class Simulation:
                 dead_part.draw(screen)
 
             for fish in self.fish_population:
-                nearest_prey = fish.find_nearest_prey(self.fish_population, self.algae_list) if fish.is_predator and not fish.is_dead else None
-                nearest_mate = fish.find_nearest_mate(self.fish_population, self.algae_list) if not fish.is_dead else None
-                nearest_food = fish.find_nearest_food(self.algae_list, self.plankton_list, self.crustacean_list, self.dead_algae_parts) if not fish.is_dead else None
+                nearest_prey = fish.find_nearest_prey(self.fish_population,
+                                    self.algae_list) if fish.is_predator and not fish.is_dead and self.show_targets else None
+                nearest_mate = fish.find_nearest_mate(self.fish_population,
+                                    self.algae_list) if not fish.is_dead and self.show_targets else None
+                nearest_food = fish.find_nearest_food(self.algae_list, self.plankton_list, self.crustacean_list,
+                                    self.dead_algae_parts) if not fish.is_dead and self.show_targets  else None
                 fish.draw(screen, self.show_vision, self.show_targets, nearest_prey, nearest_mate, nearest_food)
 
-            # Локальні змінні для статистики
-            predators = [f for f in self.fish_population if f.is_predator and not f.is_dead]
-            prey = [f for f in self.fish_population if not f.is_predator and not f.is_dead]
+            self.ui.draw()
 
-            stats = font.render(f"Fish: {len([f for f in self.fish_population if not f.is_dead])} "
-                               f"Algae: {len(self.algae_list)} Plankton: {len(self.plankton_list)} "
-                               f"Crustaceans: {len(self.crustacean_list)} Dead Parts: {len(self.dead_algae_parts)}", 
-                               True, (255, 255, 255))
-            screen.blit(stats, (10, 10))
-
-            prey_gender_stats = font.render(f"Prey ({len(prey)}) - Male: {len([f for f in prey if f.is_male])} Female: {len([f for f in prey if not f.is_male])}",
-                                            True, (255, 255, 255))
-            screen.blit(prey_gender_stats, (10, 40))
-
-            predator_gender_stats = font.render(f"Predators ({len(predators)}) - Male: {len([f for f in predators if f.is_male])} Female: {len([f for f in predators if not f.is_male])}",
-                                                True, (255, 255, 255))
-            screen.blit(predator_gender_stats, (10, 70))
-            
-            if self.paused:
-                pause_text = font.render("PAUSED", True, (255, 255, 255))
-                screen.blit(pause_text, (WIDTH//2 - pause_text.get_width()//2, HEIGHT//2 - pause_text.get_height()//2))
-            
             pygame.display.flip()
             clock.tick(60)
 
