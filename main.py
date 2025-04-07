@@ -24,21 +24,24 @@ class Algae:
         self.branch_chance = 0.1
         self.is_alive = True
 
-    def grow(self):
-        if not self.is_alive:
+    def grow(self, simulation):  
+        if not self.is_alive or simulation.day_phase == "Night":
             return
-        
+
         if self.growth_timer > 0:
             self.growth_timer -= 1
             return
-        
+
         top_y = min(seg[1] for seg in self.segments)
         if self.base_y - top_y >= self.max_height:
             return
 
+        season = simulation.seasons[simulation.current_season_index]
+        growth_modifier = {"Spring": 1.1, "Summer": 1.2, "Autumn": 0.9, "Winter": 0.7}[season]
+
         top_segment = min(self.segments, key=lambda s: s[1])
         new_x = top_segment[0] + random.uniform(-2, 2)
-        new_y = top_segment[1] - random.uniform(2, 5)
+        new_y = top_segment[1] - random.uniform(2, 5) * growth_modifier
         
         self.segments.append((new_x, new_y))
         self.energy_value += random.randint(1, 3)
@@ -47,18 +50,18 @@ class Algae:
         
         if random.random() < self.branch_chance:
             branch_x = top_segment[0] + random.uniform(-5, 5)
-            branch_y = top_segment[1] - random.uniform(2, 5)
+            branch_y = top_segment[1] - random.uniform(2, 5) * growth_modifier
             self.segments.append((branch_x, branch_y))
             self.energy_value += random.randint(1, 2)
             if branch_y < self.lowest_y:
                 self.lowest_y = branch_y  
 
         self.growth_timer = random.randint(ALGAE_GROW[0], ALGAE_GROW[1])
-
+    
     def check_root(self):
         return any(seg[1] >= self.base_y - 3 for seg in self.segments)
 
-    def update(self, algae_list, dead_algae_parts):
+    def update(self, algae_list, dead_algae_parts, simulation):
         if not self.check_root() and self.is_alive:
             self.is_alive = False
             for seg_x, seg_y in self.segments[:]:
@@ -68,11 +71,11 @@ class Algae:
             self.lowest_y = float('inf')
 
         if self.is_alive:
-            self.grow()
+            self.grow(simulation)
             if len(algae_list) < MAX_ALGAE and random.random() < 0.01:
                 new_x = self.root_x + random.randint(-20, 20)
                 if 0 <= new_x <= WIDTH:
-                    algae_list.append(Algae(new_x, self.base_y))
+                    algae_list.append(Algae(new_x, self.base_y))  
 
     def draw(self, screen):
         if not self.segments:
@@ -139,13 +142,13 @@ class Plankton:
 
 
 class Fish:
-    def __init__(self, x, y, energy, genome=None):
+    def __init__(self, x, y, simulation, energy, genome=None):
         self.x = x
         self.y = y
+        self.simulation = simulation
         self.energy = min(energy, MAX_ENERGY)
         self.size = 1.0
         
-        # Ініціалізація геному з домінантністю
         if genome is None:
             self.genome = {
                 "speed": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
@@ -162,16 +165,14 @@ class Fish:
         else:
             self.genome = genome
         
-        # Визначення статі та базових характеристик
         self.is_male = random.choice([True, False])
-        self.is_predator = None  # Буде визначено в calculate_traits
+        self.is_predator = None 
         self.age = 0
         
-        # Обчислення фенотипічних рис
         self.calculate_traits()
         
         self.energy_threshold = 40 if self.is_predator else 20
-        self.mate_vision = self.vision * 1.5  # Зір для пошуку партнера
+        self.mate_vision = self.vision * 1.5 
         self.ready_to_mate = False
         self.is_dead = False
         # self.float_speed = ((7 / (self.size * 2 + 0.5)) * 1.4 + 0.2) / 5
@@ -221,7 +222,6 @@ class Fish:
 
         self.is_predator = get_phenotype("predator") > 0.5
         self.speed = get_phenotype("speed") * (1.5 if self.is_predator else 2.5)
-        # Обчислюємо максимальний розмір
         self.max_size = get_phenotype("size") * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
         self.vision = get_phenotype("vision") * (100 if self.is_predator else 60) + (50 if self.is_predator else 30)
         self.metabolism = get_phenotype("metabolism")
@@ -273,7 +273,7 @@ class Fish:
             digestion_phenotype = get_phenotype("digestion")
             speed_phenotype = get_phenotype("speed")
 
-            growth_rate = 0.1 * (self.energy / MAX_ENERGY) * (1 + metabolism_phenotype) * (0.5 + digestion_phenotype * 0.5)
+            growth_rate = 0.01 * (self.energy / MAX_ENERGY) * (1 + metabolism_phenotype) * (0.5 + digestion_phenotype * 0.5)
             self.size = min(self.max_size, self.size + growth_rate)
             self.speed = (speed_phenotype * (1.5 if self.is_predator else 2.5) + 
                         (0.5 if self.is_predator else 1)) * (1 - self.size / 20) + metabolism_phenotype * 0.5
@@ -392,6 +392,18 @@ class Fish:
             if self.y <= 0:
                 return
             return
+
+        temperature = self.simulation.get_temperature(self.y)
+        oxygen = self.simulation.get_oxygen(self.x, self.y, algae_list)
+
+        temp_factor = abs(temperature - OPTIMAL_TEMP) / OPTIMAL_TEMP
+        metabolism_modifier = 1 + temp_factor * 0.5
+        effective_metabolism = self.metabolism * metabolism_modifier
+
+        oxygen_factor = 1.0
+        if oxygen < CRITICAL_OXYGEN:
+            oxygen_factor = oxygen / CRITICAL_OXYGEN
+            effective_metabolism *= (1 + (CRITICAL_OXYGEN - oxygen) * 0.2)
 
         self.age += APT
         self.grow()
@@ -529,8 +541,9 @@ class Fish:
             self.x = WIDTH + self.size
         self.y = max(self.size, min(HEIGHT - self.size, self.y))
 
-        energy_cost = effective_speed * self.size * 0.005 * self.metabolism * (1 - self.defense * 0.5)
-        if self.metabolism > self.digestion + 0.3:
+        energy_cost = (effective_speed * self.size * 0.005 * effective_metabolism * 
+                      (1 - self.defense * 0.5) / oxygen_factor)
+        if effective_metabolism > self.digestion + 0.3:
             energy_cost *= 1.15
         energy_cost += self.defense_cost
         self.energy -= energy_cost
@@ -557,7 +570,7 @@ class Fish:
                             prey.energy = -1
                             fish_list.remove(prey)
                         elif not prey.is_predator:
-                            escape_chance = prey.defense * 0.4
+                            escape_chance = prey.defense * 0.35
                             if random.random() >= escape_chance:
                                 energy_gain = prey.energy * (0.5 + self.digestion * 0.5)
                                 self.energy = min(MAX_ENERGY, self.energy + energy_gain)
@@ -569,7 +582,7 @@ class Fish:
                                 pass
 
                         elif prey.is_predator and prey.size + EAT_SIZE < self.size:
-                            escape_chance = prey.defense * 0.4
+                            escape_chance = prey.defense * 0.35
                             if random.random() >= escape_chance:
                                 energy_gain = prey.energy * (0.5 + self.digestion * 0.5)
                                 self.energy = min(MAX_ENERGY, self.energy + energy_gain)
@@ -656,7 +669,7 @@ class Fish:
         self.ready_to_mate = False
         partner.ready_to_mate = False
         
-        return Fish(self.x, self.y, 30, child_genome)
+        return Fish(self.x, self.y, self.simulation, 30, child_genome)
     
     def draw(self, screen, show_vision, show_targets, nearest_prey=None, nearest_mate=None, nearest_food=None):
         # Відображення зони видимості
@@ -854,6 +867,8 @@ class EventHandler:
                     if distance < fish.size + 5:
                         FishDetailsWindow(self.simulation, fish)
                         break
+                
+                print("Temperature:", self.simulation.get_temperature(mouse_y))
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
@@ -874,6 +889,22 @@ class EventHandler:
                         self.simulation.active_modes.remove("Targets")
 
                     self.simulation.show_targets = not self.simulation.show_targets
+                
+                elif event.key == pygame.K_x or event.unicode.lower() == "ч":
+                    if not self.simulation.show_temp_map:
+                        self.simulation.active_modes.append("Temp Map")
+                    else:
+                        self.simulation.active_modes.remove("Temp Map")
+
+                    self.simulation.show_temp_map = not self.simulation.show_temp_map
+
+                elif event.key == pygame.K_z or event.unicode.lower() == "я":
+                    if not self.simulation.show_oxygen_map:
+                        self.simulation.active_modes.append("Oxy Map")
+                    else:
+                        self.simulation.active_modes.remove("Oxy Map")
+
+                    self.simulation.show_oxygen_map = not self.simulation.show_oxygen_map
 
 
 class UI:
@@ -898,6 +929,10 @@ class UI:
         predator_gender_stats = self.font.render(f"Predators ({len(predators)}) - Male: {len([f for f in predators if f.is_male])} Female: {len([f for f in predators if not f.is_male])}",
                                             True, (255, 255, 255))
         screen.blit(predator_gender_stats, (10, 50))
+
+        time_info = self.font.render(f"Phase: {self.simulation.day_phase} ({self.simulation.time})  Season: {self.simulation.seasons[self.simulation.current_season_index]}", 
+                                     True, (255, 255, 255))
+        screen.blit(time_info, (10, 70))
         
         if self.simulation.paused:
             pause_text = self.font.render("PAUSED", True, (255, 255, 255))
@@ -912,12 +947,38 @@ class UI:
                 mode_text = self.font.render("Vision", True, (255, 255, 255))
             elif mode == "Targets":
                 mode_text = self.font.render("Targets", True, (255, 255, 255))
+            elif mode == 'Temp Map':
+                mode_text = self.font.render("Temp Map", True, (255, 255, 255))
+            elif mode == 'Oxy Map':
+                mode_text = self.font.render("Oxy Map", True, (255, 255, 255))
+
             screen.blit(mode_text, (x_pos, y_pos))
             y_pos += 20
+    
+    def draw_maps(self):
+        map_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        
+        if self.simulation.show_temp_map:
+            for y in range(0, HEIGHT, 10):
+                for x in range(0, WIDTH, 10):
+                    temp = self.simulation.get_temperature(y)
+                    red = min(255, max(int((temp - MIN_TEMP) / (MAX_TEMP - MIN_TEMP) * 255), 0))
+                    blue = min(255, max(int((MAX_TEMP - temp) / (MAX_TEMP - MIN_TEMP) * 255), 0))
+                    pygame.draw.rect(map_surface, (red, 0, blue, 100), (x, y, 10, 10))
+            screen.blit(map_surface, (0, 0))
+        
+        elif self.simulation.show_oxygen_map:
+            for y in range(0, HEIGHT, 10):
+                for x in range(0, WIDTH, 10):
+                    oxygen = self.simulation.get_oxygen(x, y, self.simulation.algae_list)
+                    green = min(255, int((oxygen - MIN_OXYGEN) / (MAX_OXYGEN - MIN_OXYGEN) * 255))
+                    pygame.draw.rect(map_surface, (0, green, 0, 100), (x, y, 10, 10))
+            screen.blit(map_surface, (0, 0))
 
     def draw(self):
-        self.draw_statistic()
+        self.draw_maps()
         self.draw_active_modes()
+        self.draw_statistic()
 
 
 class Simulation:
@@ -925,7 +986,7 @@ class Simulation:
         self.event_handler = EventHandler(self)
         self.ui = UI(self)
 
-        self.fish_population = [Fish(random.randint(0, WIDTH), random.randint(0, HEIGHT), random.randint(40, 60))
+        self.fish_population = [Fish(random.randint(0, WIDTH), random.randint(0, HEIGHT), self, random.randint(40, 60))
                                 for _ in range(NUM_FISH)]
         self.algae_list = [Algae(random.randint(0, WIDTH), HEIGHT)
                            for _ in range(INITIAL_ALGAE)]
@@ -940,7 +1001,16 @@ class Simulation:
 
         self.show_vision = False
         self.show_targets = False
+        self.show_temp_map = False
+        self.show_oxygen_map = False
         self.active_modes = []
+
+        self.time = 0 
+        self.day_length = 1800 # 1 день - 30 секунд
+        self.season_length = 10800 # 1 сезон - 3 хвилин
+        self.seasons = ["Spring", "Summer", "Autumn", "Winter"]
+        self.current_season_index = 0
+        self.day_phase = "Day"
 
     @staticmethod
     def create_background(width, height):
@@ -952,13 +1022,61 @@ class Simulation:
             pygame.draw.line(background, (red, green, blue), (0, y), (width, y))
         return background
 
+    def update_time(self):
+        self.time += 1
+        day_progress = (self.time % self.day_length) / self.day_length
+        self.day_phase = "Day" if day_progress < 0.5 else "Night"
+        
+        season_progress = (self.time % self.season_length) / self.season_length
+        self.current_season_index = int((self.time // self.season_length) % 4)
+
+    def get_temperature(self, y):
+        depth_factor = 1 - (y / HEIGHT)
+        base_temp = MIN_TEMP + (MAX_TEMP - MIN_TEMP) * depth_factor
+        
+        day_night_modifier = 1.0 if self.day_phase == "Day" else 0.9
+        
+        season = self.seasons[self.current_season_index]
+        if season == "Summer":
+            season_modifier = 1.1 
+        elif season == "Winter":
+            season_modifier = 0.8  
+        else:  
+            season_modifier = 1.0
+        
+        return base_temp * day_night_modifier * season_modifier
+
+    def get_oxygen(self, x, y, algae_list):
+        depth_factor = y / HEIGHT
+        base_oxygen = MAX_OXYGEN - (MAX_OXYGEN - MIN_OXYGEN) * depth_factor
+        
+        oxygen_boost = 0
+        if self.day_phase == "Day":
+            for algae in algae_list:
+                for seg_x, seg_y in algae.segments:
+                    distance = math.hypot(x - seg_x, y - seg_y)
+                    if distance < OXYGEN_BOOST_RADIUS:
+                        oxygen_boost = max(oxygen_boost, OXYGEN_BOOST * (1 - distance / OXYGEN_BOOST_RADIUS))
+        
+        season = self.seasons[self.current_season_index]
+        if season == "Summer":
+            oxygen_boost *= 1.2 
+        elif season == "Winter":
+            oxygen_boost *= 0.7
+        
+        return min(MAX_OXYGEN, base_oxygen + oxygen_boost)
+
     def run(self):
         while self.running:
             screen.blit(self.background, (0, 0))
             self.event_handler.handle_events()
 
             if not self.paused:
-                if random.random() < 0.3:
+                self.update_time()
+                season = self.seasons[self.current_season_index]
+                spawn_rate_modifier = {"Spring": 1.1, "Summer": 1.2, "Autumn": 0.9, "Winter": 0.7}[season]
+
+                if random.random() < 0.3 * spawn_rate_modifier:
                     if random.random() < 0.1:
                         new_x = random.randint(0, WIDTH)
                         self.algae_list.append(Algae(new_x, HEIGHT))
@@ -993,7 +1111,7 @@ class Simulation:
                 self.fish_population.extend(new_fish)
 
                 for algae in self.algae_list[:]:
-                    algae.update(self.algae_list, self.dead_algae_parts)
+                    algae.update(self.algae_list, self.dead_algae_parts, self)
                     if not algae.segments:
                         self.algae_list.remove(algae)
 
