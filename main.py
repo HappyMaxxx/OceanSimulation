@@ -18,7 +18,7 @@ class Algae:
         self.base_y = base_y
         self.segments = [(x, base_y)]
         self.lowest_y = base_y 
-        self.energy_value = 7
+        self.energy_value = 10
         self.growth_timer = random.randint(ALGAE_GROW[0], ALGAE_GROW[1])
         self.max_height = random.randint(int(HEIGHT * 0.3), int(HEIGHT * 0.5))
         self.branch_chance = 0.1
@@ -59,13 +59,13 @@ class Algae:
         self.growth_timer = random.randint(ALGAE_GROW[0], ALGAE_GROW[1])
     
     def check_root(self):
-        return any(seg[1] >= self.base_y - 3 for seg in self.segments)
+        return any(seg[1] >= self.base_y - 4 for seg in self.segments)
 
     def update(self, algae_list, dead_algae_parts, simulation):
         if not self.check_root() and self.is_alive:
             self.is_alive = False
             for seg_x, seg_y in self.segments[:]:
-                if seg_y < self.base_y - 3:
+                if seg_y < self.base_y - 4:
                     dead_algae_parts.append(DeadAlgaePart(seg_x, seg_y))
             self.segments.clear()
             self.lowest_y = float('inf')
@@ -142,10 +142,15 @@ class Plankton:
 
 
 class Fish:
-    def __init__(self, x, y, simulation, energy, genome=None):
+    def __init__(self, x, y, simulation, energy, genome=None, nearest_food=None, nearest_prey=None, nearest_mate=None):
         self.x = x
         self.y = y
         self.simulation = simulation
+
+        self.nearest_food = nearest_food
+        self.nearest_prey = nearest_prey
+        self.nearest_mate = nearest_mate
+
         self.energy = min(energy, MAX_ENERGY)
         self.size = 1.0
         
@@ -289,7 +294,7 @@ class Fish:
             return closest_crust if distance < effective_vision else None
         else:
             closest = None
-            min_dist = effective_vision  # Обмежуємо пошуком у межах поля зору
+            min_dist = effective_vision 
             
             for algae in algae_list:
                 for seg_x, seg_y in algae.segments:
@@ -316,7 +321,7 @@ class Fish:
         if not fish_list:
             return None
         
-        effective_vision = self.vision * (0.7 if self.is_in_algae(algae_list) else 1)  # Зменшення видимості у водоростях
+        effective_vision = self.vision * (0.7 if self.is_in_algae(algae_list) else 1)
         potential_prey = [f for f in fish_list if f != self and 
                         (f.is_dead or
                         (not f.is_predator) or 
@@ -373,8 +378,9 @@ class Fish:
             other_fish.x -= direction_x * correction
             other_fish.y -= direction_y * correction
             
-            self.direction = math.atan2(direction_y, direction_x)
-            other_fish.direction = math.atan2(-direction_y, -direction_x)
+            new_direction = math.atan2(direction_y, direction_x)
+            self.direction = self.direction * 0.5 + new_direction * 0.5
+            other_fish.direction = other_fish.direction * 0.5 + math.atan2(-direction_y, -direction_x) * 0.5
 
     def is_in_algae(self, algae_list):
         for algae in algae_list:
@@ -384,8 +390,7 @@ class Fish:
                     return True
         return False
 
-    def move(self, algae_list=None, crustacean_list=None, target_prey=None,
-             target_mate=None, target_food=None, predators=None, fish_list=None):
+    def move(self, predators=None, fish_list=None):
 
         if self.is_dead:
             self.y -= self.float_speed - self.size * 0.01
@@ -393,8 +398,14 @@ class Fish:
                 return
             return
 
-        temperature = self.simulation.get_temperature(self.y)
-        oxygen = self.simulation.get_oxygen(self.x, self.y, algae_list)
+        sim = self.simulation
+        self.nearest_food = target_food = self.find_nearest_food(sim.algae_list, sim.plankton_list,
+                                                   sim.crustacean_list, sim.dead_algae_parts)
+        self.nearest_prey = target_prey = self.find_nearest_prey(fish_list, sim.algae_list) if self.is_predator else None
+        self.nearest_mate = target_mate = self.find_nearest_mate(fish_list, sim.algae_list) 
+
+        temperature = self.simulation.get_temperature(self.x, self.y)
+        oxygen = self.simulation.get_oxygen(self.x, self.y, sim.algae_list)
 
         temp_factor = abs(temperature - OPTIMAL_TEMP) / OPTIMAL_TEMP
         metabolism_modifier = 1 + temp_factor * 0.5
@@ -408,7 +419,7 @@ class Fish:
         self.age += APT
         self.grow()
 
-        food_availability = len(algae_list) / MAX_ALGAE if not self.is_predator else len(crustacean_list) / INITIAL_CRUSTACEANS
+        food_availability = len(sim.algae_list) / MAX_ALGAE if not self.is_predator else len(sim.crustacean_list) / INITIAL_CRUSTACEANS
         self.update_epigenetics(food_availability)
 
         if self.age >= self.max_age and not self.is_dead:
@@ -418,7 +429,7 @@ class Fish:
         current_strength = (HEIGHT - self.y) / HEIGHT * 0.5
         self.x += current_strength
 
-        in_algae = self.is_in_algae(algae_list)
+        in_algae = self.is_in_algae(sim.algae_list)
         effective_speed = self.speed * (0.6 if in_algae else 1)
         effective_vision = self.vision * (0.7 if in_algae else 1)
 
@@ -505,7 +516,7 @@ class Fish:
                 self.x += math.cos(self.direction) * effective_speed
                 self.y += math.sin(self.direction) * effective_speed
         else:
-            in_algae = self.is_in_algae(algae_list)
+            in_algae = self.is_in_algae(sim.algae_list)
             effective_speed = self.speed * (0.6 if in_algae else 1)
 
             depth_difference = abs(self.y - self.preferred_depth)
@@ -542,23 +553,25 @@ class Fish:
         self.y = max(self.size, min(HEIGHT - self.size, self.y))
 
         energy_cost = (effective_speed * self.size * 0.005 * effective_metabolism * 
-                      (1 - self.defense * 0.5) / oxygen_factor)
+                      (1 - self.defense * 0.4) / oxygen_factor)
         if effective_metabolism > self.digestion + 0.3:
             energy_cost *= 1.15
         energy_cost += self.defense_cost
         self.energy -= energy_cost
         
-    def eat(self, algae_list, plankton_list, crustacean_list, dead_algae_parts, fish_list):
+    def eat(self, fish_list):
         if self.is_dead or self.energy >= MAX_ENERGY * 0.95:
             return
 
+        sim = self.simulation
+
         if self.is_predator:
-            for crust in crustacean_list[:]:
+            for crust in sim.crustacean_list[:]:
                 distance = math.hypot(self.x - crust.x, self.y - crust.y)
                 if distance < self.size + 5:
                     energy_gain = crust.energy_value * (0.5 + self.digestion * 0.5)
                     self.energy = min(MAX_ENERGY, self.energy + energy_gain)
-                    crustacean_list.remove(crust)
+                    sim.crustacean_list.remove(crust)
 
             for prey in fish_list[:]:
                 if prey != self:
@@ -593,7 +606,7 @@ class Fish:
                             else:
                                 pass
         else:
-            for algae in algae_list[:]:
+            for algae in sim.algae_list[:]:
                 for i, (seg_x, seg_y) in enumerate(algae.segments[:]):
                     distance = math.hypot(self.x - seg_x, self.y - seg_y)
                     if distance < self.size + 5:
@@ -602,22 +615,22 @@ class Fish:
                         algae.segments.pop(i)
                         algae.energy_value = max(0, algae.energy_value - 3)
                         if not algae.segments:
-                            algae_list.remove(algae)
+                            sim.algae_list.remove(algae)
                         break
             
-            for plankton in plankton_list[:]:
+            for plankton in sim.plankton_list[:]:
                 distance = math.hypot(self.x - plankton.x, self.y - plankton.y)
                 if distance < self.size + 5:
                     energy_gain = plankton.energy_value * (0.5 + self.digestion * 0.5)
                     self.energy = min(MAX_ENERGY, self.energy + energy_gain)
-                    plankton_list.remove(plankton)
+                    sim.plankton_list.remove(plankton)
             
-            for dead_part in dead_algae_parts[:]:
+            for dead_part in sim.dead_algae_parts[:]:
                 distance = math.hypot(self.x - dead_part.x, self.y - dead_part.y)
                 if distance < self.size + 5:
                     energy_gain = dead_part.energy_value * (0.5 + self.digestion * 0.5)
                     self.energy = min(MAX_ENERGY, self.energy + energy_gain)
-                    dead_algae_parts.remove(dead_part)
+                    sim.dead_algae_parts.remove(dead_part)
     
     def check_mating_readiness(self):
         if not self.is_dead:
@@ -671,7 +684,7 @@ class Fish:
         
         return Fish(self.x, self.y, self.simulation, 30, child_genome)
     
-    def draw(self, screen, show_vision, show_targets, nearest_prey=None, nearest_mate=None, nearest_food=None):
+    def draw(self, screen, show_vision, show_targets):
         # Відображення зони видимості
         if show_vision:
             vision_surface = pygame.Surface((self.vision * 2, self.vision * 2), pygame.SRCALPHA)
@@ -691,19 +704,19 @@ class Fish:
         
         # Відображення ліній до цілей
         if show_targets and not self.is_dead and self.energy < MAX_ENERGY * 0.95:
-            if self.is_predator and nearest_prey and math.hypot(nearest_prey.x - self.x, nearest_prey.y - self.y) < self.vision:
-                pygame.draw.line(screen, (255, 0, 0), (int(self.x), int(self.y)), (int(nearest_prey.x), int(nearest_prey.y)))
-            elif self.is_predator and nearest_food and math.hypot(nearest_food.x - self.x, nearest_food.y - self.y) < self.vision:
-                pygame.draw.line(screen, (255, 0, 0), (int(self.x), int(self.y)), (int(nearest_food.x), int(nearest_food.y)))
-            elif not self.is_predator and nearest_food:
-                if isinstance(nearest_food, tuple):
-                    _, (target_x, target_y) = nearest_food
+            if self.is_predator and self.nearest_prey and math.hypot(self.nearest_prey.x - self.x, self.nearest_prey.y - self.y) < self.vision:
+                pygame.draw.line(screen, (255, 0, 0), (int(self.x), int(self.y)), (int(self.nearest_prey.x), int(self.nearest_prey.y)))
+            elif self.is_predator and self.nearest_food and math.hypot(self.nearest_food.x - self.x, self.nearest_food.y - self.y) < self.vision:
+                pygame.draw.line(screen, (255, 0, 0), (int(self.x), int(self.y)), (int(self.nearest_food.x), int(self.nearest_food.y)))
+            elif not self.is_predator and self.nearest_food:
+                if isinstance(self.nearest_food, tuple):
+                    _, (target_x, target_y) = self.nearest_food
                 else: 
-                    target_x, target_y = nearest_food.x, nearest_food.y
+                    target_x, target_y = self.nearest_food.x, self.nearest_food.y
                 if math.hypot(target_x - self.x, target_y - self.y) < self.vision:
                     pygame.draw.line(screen, (0, 255, 0), (int(self.x), int(self.y)), (int(target_x), int(target_y)))
-            elif nearest_mate and self.ready_to_mate and math.hypot(nearest_mate.x - self.x, nearest_mate.y - self.y) < self.mate_vision:
-                pygame.draw.line(screen, (255, 255, 0), (int(self.x), int(self.y)), (int(nearest_mate.x), int(nearest_mate.y)))
+            elif self.nearest_mate and self.ready_to_mate and math.hypot(self.nearest_mate.x - self.x, self.nearest_mate.y - self.y) < self.mate_vision:
+                pygame.draw.line(screen, (255, 255, 0), (int(self.x), int(self.y)), (int(self.nearest_mate.x), int(self.nearest_mate.y)))
 
         if self.is_dead:
             pygame.draw.circle(screen, (100, 100, 100), (int(self.x), int(self.y)), int(self.size))
@@ -868,43 +881,21 @@ class EventHandler:
                         FishDetailsWindow(self.simulation, fish)
                         break
                 
-                print("Temperature:", self.simulation.get_temperature(mouse_y))
-
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     self.simulation.paused = not self.simulation.paused
 
                 elif event.key == pygame.K_v or event.unicode.lower() == "м":
-                    if not self.simulation.show_vision:
-                        self.simulation.active_modes.append("Vision") 
-                    else:
-                        self.simulation.active_modes.remove("Vision")
-
-                    self.simulation.show_vision = not self.simulation.show_vision
+                    self.simulation.modes.toggle_mode('show_vision', "Vision")
 
                 elif event.key == pygame.K_c or event.unicode.lower() == "с":
-                    if not self.simulation.show_targets:
-                        self.simulation.active_modes.append("Targets")
-                    else:
-                        self.simulation.active_modes.remove("Targets")
-
-                    self.simulation.show_targets = not self.simulation.show_targets
+                    self.simulation.modes.toggle_mode('show_targets', "Targets")
                 
                 elif event.key == pygame.K_x or event.unicode.lower() == "ч":
-                    if not self.simulation.show_temp_map:
-                        self.simulation.active_modes.append("Temp Map")
-                    else:
-                        self.simulation.active_modes.remove("Temp Map")
-
-                    self.simulation.show_temp_map = not self.simulation.show_temp_map
+                    self.simulation.modes.toggle_mode('show_temp_map', "Temp Map")
 
                 elif event.key == pygame.K_z or event.unicode.lower() == "я":
-                    if not self.simulation.show_oxygen_map:
-                        self.simulation.active_modes.append("Oxy Map")
-                    else:
-                        self.simulation.active_modes.remove("Oxy Map")
-
-                    self.simulation.show_oxygen_map = not self.simulation.show_oxygen_map
+                    self.simulation.modes.toggle_mode('show_oxygen_map', "Oxy Map")
 
 
 class UI:
@@ -916,22 +907,27 @@ class UI:
         predators = [f for f in self.simulation.fish_population if f.is_predator and not f.is_dead]
         prey = [f for f in self.simulation.fish_population if not f.is_predator and not f.is_dead]
 
-        stats = self.font.render(f"Fish: {len([f for f in self.simulation.fish_population if not f.is_dead])} "
-                            f"Algae: {len(self.simulation.algae_list)} Plankton: {len(self.simulation.plankton_list)} "
-                            f"Crustaceans: {len(self.simulation.crustacean_list)} Dead Parts: {len(self.simulation.dead_algae_parts)}", 
+        sim = self.simulation
+
+        stats = self.font.render(f"Fish: {len([f for f in sim.fish_population if not f.is_dead])} "
+                            f"Algae: {len(sim.algae_list)} Plankton: {len(sim.plankton_list)} "
+                            f"Crustaceans: {len(sim.crustacean_list)} Dead Parts: {len(sim.dead_algae_parts)}", 
                             True, (255, 255, 255))
         screen.blit(stats, (10, 10))
 
-        prey_gender_stats = self.font.render(f"Prey ({len(prey)}) - Male: {len([f for f in prey if f.is_male])} Female: {len([f for f in prey if not f.is_male])}",
+        prey_gender_stats = self.font.render(f"Prey ({len(prey)}) - Male: {len([f for f in prey if f.is_male])} "
+                                        f"Female: {len([f for f in prey if not f.is_male])}",
                                         True, (255, 255, 255))
         screen.blit(prey_gender_stats, (10, 30))
 
-        predator_gender_stats = self.font.render(f"Predators ({len(predators)}) - Male: {len([f for f in predators if f.is_male])} Female: {len([f for f in predators if not f.is_male])}",
+        predator_gender_stats = self.font.render(f"Predators ({len(predators)}) - Male: {len([f for f in predators if f.is_male])} "
+                                            f"Female: {len([f for f in predators if not f.is_male])}",
                                             True, (255, 255, 255))
         screen.blit(predator_gender_stats, (10, 50))
 
-        time_info = self.font.render(f"Phase: {self.simulation.day_phase} ({self.simulation.time})  Season: {self.simulation.seasons[self.simulation.current_season_index]}", 
-                                     True, (255, 255, 255))
+        time_info = self.font.render(f"Phase: {sim.day_phase} {sim.time // sim.day_length:.0f} ({sim.time}) "
+                                f"Season: {sim.seasons[sim.current_season_index]}", 
+                                True, (255, 255, 255))
         screen.blit(time_info, (10, 70))
         
         if self.simulation.paused:
@@ -942,7 +938,7 @@ class UI:
         x_pos = WIDTH - 100 
         y_pos = 10  
 
-        for mode in self.simulation.active_modes:
+        for mode in self.simulation.modes.active_modes:
             if mode == "Vision":
                 mode_text = self.font.render("Vision", True, (255, 255, 255))
             elif mode == "Targets":
@@ -958,16 +954,16 @@ class UI:
     def draw_maps(self):
         map_surface = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
         
-        if self.simulation.show_temp_map:
+        if self.simulation.modes.show_temp_map:
             for y in range(0, HEIGHT, 10):
                 for x in range(0, WIDTH, 10):
-                    temp = self.simulation.get_temperature(y)
+                    temp = self.simulation.get_temperature(x, y)
                     red = min(255, max(int((temp - MIN_TEMP) / (MAX_TEMP - MIN_TEMP) * 255), 0))
                     blue = min(255, max(int((MAX_TEMP - temp) / (MAX_TEMP - MIN_TEMP) * 255), 0))
                     pygame.draw.rect(map_surface, (red, 0, blue, 100), (x, y, 10, 10))
             screen.blit(map_surface, (0, 0))
         
-        elif self.simulation.show_oxygen_map:
+        elif self.simulation.modes.show_oxygen_map:
             for y in range(0, HEIGHT, 10):
                 for x in range(0, WIDTH, 10):
                     oxygen = self.simulation.get_oxygen(x, y, self.simulation.algae_list)
@@ -981,10 +977,37 @@ class UI:
         self.draw_statistic()
 
 
+class ModeManager:
+    def __init__(self):
+        self.show_vision = False
+        self.show_targets = False
+        self.show_temp_map = False
+        self.show_oxygen_map = False
+        self.active_modes = []
+    
+    def toggle_mode(self, mode, text):
+        setattr(self, mode, not getattr(self, mode))
+
+        if getattr(self, mode):
+            if text == 'Temp Map' and 'Oxy Map' in self.active_modes:
+                self.active_modes.remove('Oxy Map')
+                self.show_oxygen_map = False
+            elif text == 'Oxy Map' and 'Temp Map' in self.active_modes:
+                self.active_modes.remove('Temp Map')
+                self.show_temp_map = False
+
+            if text not in self.active_modes:
+                self.active_modes.append(text)
+        else:
+            if text in self.active_modes:
+                self.active_modes.remove(text)
+
+
 class Simulation:
     def __init__(self):
         self.event_handler = EventHandler(self)
         self.ui = UI(self)
+        self.modes = ModeManager()
 
         self.fish_population = [Fish(random.randint(0, WIDTH), random.randint(0, HEIGHT), self, random.randint(40, 60))
                                 for _ in range(NUM_FISH)]
@@ -999,18 +1022,23 @@ class Simulation:
         self.paused = False
         self.background = self.create_background(WIDTH, HEIGHT)
 
-        self.show_vision = False
-        self.show_targets = False
-        self.show_temp_map = False
-        self.show_oxygen_map = False
-        self.active_modes = []
-
         self.time = 0 
-        self.day_length = 1800 # 1 день - 30 секунд
-        self.season_length = 10800 # 1 сезон - 3 хвилин
+        self.day_length = DAY_LENGTH
+        self.season_length = SEASON_LENGTH
         self.seasons = ["Spring", "Summer", "Autumn", "Winter"]
         self.current_season_index = 0
         self.day_phase = "Day"
+
+        self.prev_season_modifier = 0.8
+        self.current_season_modifier = 1.0
+
+        self.grid_size = 4  
+        self.oxygen_grid = {}  
+        self.temperature_grid = {} 
+        self.last_oxygen_update = -1
+        self.last_temperature_update = -1
+        self.update_oxygen_grid()
+        self.update_temperature_grid()
 
     @staticmethod
     def create_background(width, height):
@@ -1024,47 +1052,114 @@ class Simulation:
 
     def update_time(self):
         self.time += 1
+        self.update_oxygen_grid()
+        self.update_temperature_grid()
         day_progress = (self.time % self.day_length) / self.day_length
         self.day_phase = "Day" if day_progress < 0.5 else "Night"
         
         season_progress = (self.time % self.season_length) / self.season_length
         self.current_season_index = int((self.time // self.season_length) % 4)
+        
+        target_season_modifier = {"Spring": 1.0, "Summer": 1.1, "Autumn": 0.9, "Winter": 0.8}[self.seasons[self.current_season_index]]
+        transition_duration = self.season_length * 0.1 
+        if self.time % self.season_length < transition_duration:
+            progress = (self.time % self.season_length) / transition_duration
+            self.current_season_modifier = self.prev_season_modifier + (target_season_modifier - self.prev_season_modifier) * progress
+        elif self.time % self.season_length > self.season_length - transition_duration:
+            progress = ((self.season_length - (self.time % self.season_length)) / transition_duration)
+            next_season_index = (self.current_season_index + 1) % 4
+            next_season_modifier = {"Spring": 1.0, "Summer": 1.1, "Autumn": 0.9, "Winter": 0.8}[self.seasons[next_season_index]]
+            self.current_season_modifier = target_season_modifier + (next_season_modifier - target_season_modifier) * (1 - progress)
+        else:
+            self.current_season_modifier = target_season_modifier
+        
+        if self.time % self.season_length == 0:
+            self.prev_season_modifier = target_season_modifier
 
-    def get_temperature(self, y):
-        depth_factor = 1 - (y / HEIGHT)
-        base_temp = MIN_TEMP + (MAX_TEMP - MIN_TEMP) * depth_factor
-        
-        day_night_modifier = 1.0 if self.day_phase == "Day" else 0.9
-        
+        if self.time == self.season_length * 4:
+            self.time = 0
+            self.current_season_index = 0
+            self.prev_season_modifier = 0.8
+            self.current_season_modifier = 1.0
+
+    def update_temperature_grid(self):
+        self.temperature_grid.clear()
+        grid_width = WIDTH // self.grid_size + 1
+        grid_height = HEIGHT // self.grid_size + 1
+
+        for gy in range(grid_height):
+            y = gy * self.grid_size
+            depth_factor = 1 - (y / HEIGHT)
+            base_temp = MIN_TEMP + (MAX_TEMP - MIN_TEMP) * depth_factor
+            for gx in range(grid_width):
+                self.temperature_grid[(gx, gy)] = base_temp
+
+        day_progress = (self.time % self.day_length) / self.day_length
+        day_night_modifier = 0.95 + 0.05 * math.sin(day_progress * 2 * math.pi)
+
         season = self.seasons[self.current_season_index]
-        if season == "Summer":
-            season_modifier = 1.1 
-        elif season == "Winter":
-            season_modifier = 0.8  
-        else:  
-            season_modifier = 1.0
+        season_modifier = {"Spring": 1.0, "Summer": 1.1, "Autumn": 0.9, "Winter": 0.8}[season]
+
+        for (gx, gy), temp in self.temperature_grid.items():
+            self.temperature_grid[(gx, gy)] = temp * day_night_modifier * season_modifier
+
+        self.last_temperature_update = self.time
+
+    def get_temperature(self, x, y):
+        if self.time != self.last_temperature_update:
+            self.update_temperature_grid()
+
+        gx = int(x // self.grid_size)
+        gy = int(y // self.grid_size)
         
-        return base_temp * day_night_modifier * season_modifier
+        return self.temperature_grid.get((gx, gy), MIN_TEMP)
+
+    def update_oxygen_grid(self):
+        self.oxygen_grid.clear()
+        grid_width = WIDTH // self.grid_size + 1
+        grid_height = HEIGHT // self.grid_size + 1
+
+        for gy in range(grid_height):
+            y = gy * self.grid_size
+            depth_factor = y / HEIGHT
+            base_oxygen = MAX_OXYGEN - (MAX_OXYGEN - MIN_OXYGEN) * depth_factor
+            for gx in range(grid_width):
+                self.oxygen_grid[(gx, gy)] = base_oxygen
+
+        day_progress = (self.time % self.day_length) / self.day_length
+        day_night_factor = 0.5 + 0.5 * math.sin(day_progress * 2 * math.pi - math.pi / 2)
+
+        season = self.seasons[self.current_season_index]
+        season_modifier = {"Spring": 1.0, "Summer": 1.2, "Autumn": 0.9, "Winter": 0.7}[season]
+
+        for algae in self.algae_list:
+            for seg_x, seg_y in algae.segments:
+                gx = int(seg_x // self.grid_size)
+                gy = int(seg_y // self.grid_size)
+                for dx in range(-1, 2):
+                    for dy in range(-1, 2):
+                        grid_x = gx + dx
+                        grid_y = gy + dy
+                        if (grid_x, grid_y) in self.oxygen_grid:
+                            center_x = grid_x * self.grid_size + self.grid_size / 2
+                            center_y = grid_y * self.grid_size + self.grid_size / 2
+                            distance = math.hypot(center_x - seg_x, center_y - seg_y)
+                            if distance < OXYGEN_BOOST_RADIUS:
+                                boost = OXYGEN_BOOST * (1 - distance / OXYGEN_BOOST_RADIUS) * day_night_factor * season_modifier
+                                self.oxygen_grid[(grid_x, grid_y)] = min(
+                                    MAX_OXYGEN, self.oxygen_grid[(grid_x, grid_y)] + boost
+                                )
+
+        self.last_oxygen_update = self.time
 
     def get_oxygen(self, x, y, algae_list):
-        depth_factor = y / HEIGHT
-        base_oxygen = MAX_OXYGEN - (MAX_OXYGEN - MIN_OXYGEN) * depth_factor
+        if self.time != self.last_oxygen_update:
+            self.update_oxygen_grid()
+
+        gx = int(x // self.grid_size)
+        gy = int(y // self.grid_size)
         
-        oxygen_boost = 0
-        if self.day_phase == "Day":
-            for algae in algae_list:
-                for seg_x, seg_y in algae.segments:
-                    distance = math.hypot(x - seg_x, y - seg_y)
-                    if distance < OXYGEN_BOOST_RADIUS:
-                        oxygen_boost = max(oxygen_boost, OXYGEN_BOOST * (1 - distance / OXYGEN_BOOST_RADIUS))
-        
-        season = self.seasons[self.current_season_index]
-        if season == "Summer":
-            oxygen_boost *= 1.2 
-        elif season == "Winter":
-            oxygen_boost *= 0.7
-        
-        return min(MAX_OXYGEN, base_oxygen + oxygen_boost)
+        return self.oxygen_grid.get((gx, gy), MIN_OXYGEN)
 
     def run(self):
         while self.running:
@@ -1089,16 +1184,13 @@ class Simulation:
                 for fish in self.fish_population[:]:
                     fish.check_mating_readiness()
 
-                    nearest_prey = fish.find_nearest_prey(self.fish_population, self.algae_list) if fish.is_predator and not fish.is_dead else None
-                    nearest_mate = fish.find_nearest_mate(self.fish_population, self.algae_list) if not fish.is_dead else None
-                    nearest_food = fish.find_nearest_food(self.algae_list, self.plankton_list, self.crustacean_list, self.dead_algae_parts) if not fish.is_dead else None
                     predators = [f for f in self.fish_population if f.is_predator and not f.is_dead]  # Локальний список хижаків
 
-                    fish.move(self.algae_list, self.crustacean_list, nearest_prey, nearest_mate, nearest_food, predators, self.fish_population)
-                    fish.eat(self.algae_list, self.plankton_list, self.crustacean_list, self.dead_algae_parts, self.fish_population)
+                    fish.move(predators, self.fish_population)
+                    fish.eat(self.fish_population)
                     
-                    if fish.ready_to_mate and nearest_mate:
-                        if baby := fish.mate(nearest_mate):
+                    if fish.ready_to_mate and fish.nearest_mate:
+                        if baby := fish.mate(fish.nearest_mate):
                             new_fish.append(baby)
                     
                     if fish.energy <= 0 and not fish.is_dead:
@@ -1129,7 +1221,7 @@ class Simulation:
                     dead_part.update()
                     if dead_part.lifetime <= 0 or dead_part.y <= 0:
                         self.dead_algae_parts.remove(dead_part)
-
+                
             for algae in self.algae_list:
                 algae.draw(screen)
             for crust in self.crustacean_list:
@@ -1140,13 +1232,7 @@ class Simulation:
                 dead_part.draw(screen)
 
             for fish in self.fish_population:
-                nearest_prey = fish.find_nearest_prey(self.fish_population,
-                                    self.algae_list) if fish.is_predator and not fish.is_dead and self.show_targets else None
-                nearest_mate = fish.find_nearest_mate(self.fish_population,
-                                    self.algae_list) if not fish.is_dead and self.show_targets else None
-                nearest_food = fish.find_nearest_food(self.algae_list, self.plankton_list, self.crustacean_list,
-                                    self.dead_algae_parts) if not fish.is_dead and self.show_targets  else None
-                fish.draw(screen, self.show_vision, self.show_targets, nearest_prey, nearest_mate, nearest_food)
+                fish.draw(screen, self.modes.show_vision, self.modes.show_targets)
 
             self.ui.draw()
 
