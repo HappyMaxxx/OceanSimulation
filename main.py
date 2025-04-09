@@ -165,7 +165,7 @@ class Fish:
                 "defense": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
                 "color": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
                 "preferred_depth": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
-                "predator": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])}
+                "predator": {"alleles": [random.uniform(0, 0.85), random.uniform(0, 0.85)], "dominance": random.choice([0, 1])}
             }
         else:
             self.genome = genome
@@ -391,24 +391,42 @@ class Fish:
         return False
 
     def move(self, predators=None, fish_list=None):
+        sim = self.simulation
 
         if self.is_dead:
-            self.y -= self.float_speed - self.size * 0.01
-            if self.y <= 0:
+            current_x = sim.current_strength * math.cos(sim.current_direction)
+            current_y = sim.current_strength * math.sin(sim.current_direction) + sim.vertical_current_strength
+            self.x += current_x * 1.15
+            self.y += current_y * 1.15 - (self.float_speed - self.size * 0.02) 
+            if self.y <= 0: 
                 return
             return
 
-        sim = self.simulation
         self.nearest_food = target_food = self.find_nearest_food(sim.algae_list, sim.plankton_list,
                                                    sim.crustacean_list, sim.dead_algae_parts)
         self.nearest_prey = target_prey = self.find_nearest_prey(fish_list, sim.algae_list) if self.is_predator else None
-        self.nearest_mate = target_mate = self.find_nearest_mate(fish_list, sim.algae_list) 
+        self.nearest_mate = target_mate = self.find_nearest_mate(fish_list, sim.algae_list)
+
+        current_x = sim.current_strength * math.cos(sim.current_direction)
+        current_y = sim.current_strength * math.sin(sim.current_direction) + sim.vertical_current_strength
+        current_vector = math.hypot(current_x, current_y)  
+        current_angle = math.atan2(current_y, current_x)  
+
+        in_algae = self.is_in_algae(sim.algae_list)
+        base_speed = self.speed * (0.6 if in_algae else 1)  
+        angle_diff = (self.direction - current_angle + math.pi) % (2 * math.pi) - math.pi  
+        resistance_factor = math.cos(angle_diff) 
+        effective_speed = base_speed * (1 - current_vector * 0.5 * (1 - resistance_factor)) 
+        effective_speed = max(0, effective_speed) 
+
+        self.x += current_x * 0.5  
+        self.y += current_y * 0.5
 
         temperature = self.simulation.get_temperature(self.x, self.y)
         oxygen = self.simulation.get_oxygen(self.x, self.y, sim.algae_list)
 
         temp_factor = abs(temperature - OPTIMAL_TEMP) / OPTIMAL_TEMP
-        metabolism_modifier = 1 + temp_factor * 0.5
+        metabolism_modifier = 1 + temp_factor * 0.3
         effective_metabolism = self.metabolism * metabolism_modifier
 
         oxygen_factor = 1.0
@@ -426,12 +444,15 @@ class Fish:
             self.is_dead = True
             self.energy = max(self.energy, 10)
 
-        current_strength = (HEIGHT - self.y) / HEIGHT * 0.5
+        current_strength = (HEIGHT - self.y) / HEIGHT * 0.5  
         self.x += current_strength
 
-        in_algae = self.is_in_algae(sim.algae_list)
-        effective_speed = self.speed * (0.6 if in_algae else 1)
         effective_vision = self.vision * (0.7 if in_algae else 1)
+
+        if sim.seasons[sim.current_season_index] == "Spring":
+            self.reproduction_rate = 0.55 if not self.is_predator else 0.35
+        else:
+            self.reproduction_rate = 0.45 if not self.is_predator else 0.25
 
         nearest_predator = None
         if predators:
@@ -517,7 +538,7 @@ class Fish:
                 self.y += math.sin(self.direction) * effective_speed
         else:
             in_algae = self.is_in_algae(sim.algae_list)
-            effective_speed = self.speed * (0.6 if in_algae else 1)
+            effective_speed = self.speed * (0.6 if in_algae else 1) 
 
             depth_difference = abs(self.y - self.preferred_depth)
             if depth_difference > self.preferred_depth_range and random.random() < 0.3:  
@@ -541,6 +562,7 @@ class Fish:
 
             self.direction = max(-math.pi/2, min(math.pi/2, self.direction))
 
+        # Обробка колізій з іншими рибами
         if fish_list:
             for other_fish in fish_list:
                 if other_fish != self:
@@ -550,6 +572,7 @@ class Fish:
             self.x = -self.size
         elif self.x < -self.size:
             self.x = WIDTH + self.size
+
         self.y = max(self.size, min(HEIGHT - self.size, self.y))
 
         energy_cost = (effective_speed * self.size * 0.005 * effective_metabolism * 
@@ -665,12 +688,12 @@ class Fish:
             else:
                 partner_allele = random.choice(partner_alleles)
             
-            mutation_range = 0.05 if key == 'predator' else 0.15
+            mutation_range = 0.005 if key == 'predator' else 0.15
             if random.random() < MUTATION_RATE:
                 self_allele = max(0, min(1, self_allele + random.uniform(-mutation_range, mutation_range)))
             if random.random() < MUTATION_RATE:
                 partner_allele = max(0, min(1, partner_allele + random.uniform(-mutation_range, mutation_range)))
-            
+                
             child_genome[key] = {
                 "alleles": [self_allele, partner_allele],
                 "dominance": random.choice([0, 1])
@@ -896,6 +919,9 @@ class EventHandler:
 
                 elif event.key == pygame.K_z or event.unicode.lower() == "я":
                     self.simulation.modes.toggle_mode('show_oxygen_map', "Oxy Map")
+                
+                elif event.key == pygame.K_a or event.unicode.lower() == "ф":
+                    self.simulation.modes.toggle_mode('show_current', "Current")
 
 
 class UI:
@@ -947,6 +973,10 @@ class UI:
                 mode_text = self.font.render("Temp Map", True, (255, 255, 255))
             elif mode == 'Oxy Map':
                 mode_text = self.font.render("Oxy Map", True, (255, 255, 255))
+            elif mode == 'Current':
+                mode_text = self.font.render("Current", True, (255, 255, 255))
+            else:
+                continue
 
             screen.blit(mode_text, (x_pos, y_pos))
             y_pos += 20
@@ -971,8 +1001,37 @@ class UI:
                     pygame.draw.rect(map_surface, (0, green, 0, 100), (x, y, 10, 10))
             screen.blit(map_surface, (0, 0))
 
+    def draw_current(self):
+        if self.simulation.modes.show_current:
+            strength = self.simulation.current_strength
+            direction = self.simulation.current_direction  
+            
+            direction_degrees = math.degrees(direction) % 360
+
+            current_text = self.font.render(f"Current: {strength:.2f} m/s, {direction_degrees:.0f}°", True, (255, 255, 255))
+            screen.blit(current_text, (10, 90))  
+
+            arrow_length = 30 
+            arrow_x = 50 
+            arrow_y = 150
+            end_x = arrow_x + arrow_length * math.cos(direction)
+            end_y = arrow_y + arrow_length * math.sin(direction)
+
+            pygame.draw.line(screen, (255, 255, 255), (arrow_x, arrow_y), (end_x, end_y), 2)
+            
+            arrow_head_size = 8
+            angle_offset = math.pi / 6  
+            left_wing_x = end_x - arrow_head_size * math.cos(direction + angle_offset)
+            left_wing_y = end_y - arrow_head_size * math.sin(direction + angle_offset)
+            right_wing_x = end_x - arrow_head_size * math.cos(direction - angle_offset)
+            right_wing_y = end_y - arrow_head_size * math.sin(direction - angle_offset)
+            
+            pygame.draw.line(screen, (255, 255, 255), (end_x, end_y), (left_wing_x, left_wing_y), 2)
+            pygame.draw.line(screen, (255, 255, 255), (end_x, end_y), (right_wing_x, right_wing_y), 2)
+
     def draw(self):
         self.draw_maps()
+        self.draw_current()
         self.draw_active_modes()
         self.draw_statistic()
 
@@ -983,6 +1042,7 @@ class ModeManager:
         self.show_targets = False
         self.show_temp_map = False
         self.show_oxygen_map = False
+        self.show_current = False
         self.active_modes = []
     
     def toggle_mode(self, mode, text):
@@ -1040,6 +1100,16 @@ class Simulation:
         self.update_oxygen_grid()
         self.update_temperature_grid()
 
+        # Ініціалізація течії
+        self.current_strength = 0.3  
+        self.current_direction = 0.0  # радіани
+        self.vertical_current_strength = 0.0 
+        self.target_strength = 0.3
+        self.target_direction = 0.0  
+        self.target_vertical_strength = 0.0  
+        self.current_change_timer = 0  
+        self.current_change_interval = DAY_LENGTH * 3.5
+
     @staticmethod
     def create_background(width, height):
         background = pygame.Surface((width, height))
@@ -1052,14 +1122,34 @@ class Simulation:
 
     def update_time(self):
         self.time += 1
-        self.update_oxygen_grid()
-        self.update_temperature_grid()
         day_progress = (self.time % self.day_length) / self.day_length
         self.day_phase = "Day" if day_progress < 0.5 else "Night"
         
         season_progress = (self.time % self.season_length) / self.season_length
         self.current_season_index = int((self.time // self.season_length) % 4)
         
+        self.current_change_timer += 1
+        if self.current_change_timer >= self.current_change_interval:
+            self.current_change_timer = 0
+            season = self.seasons[self.current_season_index]
+            season_modifier = {"Spring": 0.8, "Summer": 1.0, "Autumn": 0.9, "Winter": 0.7}[season]
+            self.target_strength = random.uniform(0.1, 0.5) * season_modifier
+            
+            base_direction = math.pi/2 if season in ["Spring", "Summer"] else -math.pi/2
+            self.target_direction = base_direction + random.uniform(-math.pi/4, math.pi/4)
+            self.target_vertical_strength = (random.uniform(0.0, 0.2) if season == "Summer" else 
+                                            random.uniform(-0.2, 0.0) if season == "Winter" else 0.0)
+
+        transition_speed = 0.005
+        self.current_strength += (self.target_strength - self.current_strength) * transition_speed
+        
+        angle_diff = self.target_direction - self.current_direction
+        angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi  
+        self.current_direction += angle_diff * transition_speed
+        self.current_direction = self.current_direction % (2 * math.pi)
+
+        self.vertical_current_strength += (self.target_vertical_strength - self.vertical_current_strength) * transition_speed
+
         target_season_modifier = {"Spring": 1.0, "Summer": 1.1, "Autumn": 0.9, "Winter": 0.8}[self.seasons[self.current_season_index]]
         transition_duration = self.season_length * 0.1 
         if self.time % self.season_length < transition_duration:
