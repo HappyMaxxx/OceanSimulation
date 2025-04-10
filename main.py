@@ -1,6 +1,7 @@
 import pygame
 import random
 import math
+import noise
 import tkinter as tk
 from threading import Thread
 
@@ -165,7 +166,7 @@ class Fish:
                 "defense": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
                 "color": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
                 "preferred_depth": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
-                "predator": {"alleles": [random.uniform(0, 0.85), random.uniform(0, 0.85)], "dominance": random.choice([0, 1])}
+                "predator": {"alleles": [random.uniform(0, 0.75), random.uniform(0, 0.85)], "dominance": random.choice([0, 1])}
             }
         else:
             self.genome = genome
@@ -372,7 +373,7 @@ class Fish:
             direction_x = (self.x - other_fish.x) / distance
             direction_y = (self.y - other_fish.y) / distance
             
-            correction = overlap * OVERLAP_THRESHOLD * 0.8
+            correction = overlap * OVERLAP_THRESHOLD * 1.1
             self.x += direction_x * correction
             self.y += direction_y * correction
             other_fish.x -= direction_x * correction
@@ -394,10 +395,12 @@ class Fish:
         sim = self.simulation
 
         if self.is_dead:
-            current_x = sim.current_strength * math.cos(sim.current_direction)
-            current_y = sim.current_strength * math.sin(sim.current_direction) + sim.vertical_current_strength
-            self.x += current_x * 1.15
-            self.y += current_y * 1.15 - (self.float_speed - self.size * 0.02) 
+            strength, direction = sim.current_grid.get_current_at(self.x, self.y)
+            current_x = strength * math.cos(direction)
+            current_y = strength * math.sin(direction)
+            
+            self.x += current_x * 1.15 
+            self.y += current_y * 1.15 - (self.float_speed * 1.2 - self.size * 0.02)
             if self.y <= 0: 
                 return
             return
@@ -407,10 +410,11 @@ class Fish:
         self.nearest_prey = target_prey = self.find_nearest_prey(fish_list, sim.algae_list) if self.is_predator else None
         self.nearest_mate = target_mate = self.find_nearest_mate(fish_list, sim.algae_list)
 
-        current_x = sim.current_strength * math.cos(sim.current_direction)
-        current_y = sim.current_strength * math.sin(sim.current_direction) + sim.vertical_current_strength
+        strength, direction = sim.current_grid.get_current_at(self.x, self.y)
+        current_x = strength * math.cos(direction)
+        current_y = strength * math.sin(direction)
         current_vector = math.hypot(current_x, current_y)  
-        current_angle = math.atan2(current_y, current_x)  
+        current_angle = math.atan2(current_y, current_x)
 
         in_algae = self.is_in_algae(sim.algae_list)
         base_speed = self.speed * (0.6 if in_algae else 1)  
@@ -1001,33 +1005,53 @@ class UI:
                     pygame.draw.rect(map_surface, (0, green, 0, 100), (x, y, 10, 10))
             screen.blit(map_surface, (0, 0))
 
+    def generate_colors(self, num_layers):
+        colors = []
+        for layer in range(num_layers):
+            t = layer / (num_layers - 1) if num_layers > 1 else 0
+
+            red = int(255 - (255 - 200) * t)
+            green = int(200 + (255 - 200) * (1 - abs(1 - 2 * t)))
+            blue = int(200 + (255 - 200) * t)
+            colors.append((red, green, blue, 1))
+        return colors
+
     def draw_current(self):
         if self.simulation.modes.show_current:
-            strength = self.simulation.current_strength
-            direction = self.simulation.current_direction  
+            grid = self.simulation.current_grid
+            arrow_length = 15
             
-            direction_degrees = math.degrees(direction) % 360
-
-            current_text = self.font.render(f"Current: {strength:.2f} m/s, {direction_degrees:.0f}°", True, (255, 255, 255))
-            screen.blit(current_text, (10, 90))  
-
-            arrow_length = 30 
-            arrow_x = 50 
-            arrow_y = 150
-            end_x = arrow_x + arrow_length * math.cos(direction)
-            end_y = arrow_y + arrow_length * math.sin(direction)
-
-            pygame.draw.line(screen, (255, 255, 255), (arrow_x, arrow_y), (end_x, end_y), 2)
+            colors = self.generate_colors(grid.layers)
             
-            arrow_head_size = 8
-            angle_offset = math.pi / 6  
-            left_wing_x = end_x - arrow_head_size * math.cos(direction + angle_offset)
-            left_wing_y = end_y - arrow_head_size * math.sin(direction + angle_offset)
-            right_wing_x = end_x - arrow_head_size * math.cos(direction - angle_offset)
-            right_wing_y = end_y - arrow_head_size * math.sin(direction - angle_offset)
+            for layer in range(1, grid.layers):
+                boundary = grid.layer_boundaries[layer]
+                points = [(col * grid.grid_size, boundary[col]) for col in range(len(boundary))]
+                if len(points) > 1:
+                    pygame.draw.lines(screen, (255, 255, 255, 50), False, points, 1)
             
-            pygame.draw.line(screen, (255, 255, 255), (end_x, end_y), (left_wing_x, left_wing_y), 2)
-            pygame.draw.line(screen, (255, 255, 255), (end_x, end_y), (right_wing_x, right_wing_y), 2)
+            for (col, row), current in grid.grid.items():
+                strength = current["strength"]
+                direction = current["direction"]
+                x = col * grid.grid_size + grid.grid_size / 2
+                y = row * grid.grid_size + grid.grid_size / 2
+                
+                layer = grid.get_layer_at(x, y)
+                color = colors[layer]  
+                
+                end_x = x + arrow_length * math.cos(direction) * strength * 2
+                end_y = y + arrow_length * math.sin(direction) * strength * 2
+                
+                pygame.draw.line(screen, color, (x, y), (end_x, end_y), 2)
+                
+                arrow_head_size = 5
+                angle_offset = math.pi / 6
+                left_wing_x = end_x - arrow_head_size * math.cos(direction + angle_offset)
+                left_wing_y = end_y - arrow_head_size * math.sin(direction + angle_offset)
+                right_wing_x = end_x - arrow_head_size * math.cos(direction - angle_offset)
+                right_wing_y = end_y - arrow_head_size * math.sin(direction - angle_offset)
+                
+                pygame.draw.line(screen, color, (end_x, end_y), (left_wing_x, left_wing_y), 2)
+                pygame.draw.line(screen, color, (end_x, end_y), (right_wing_x, right_wing_y), 2)
 
     def draw(self):
         self.draw_maps()
@@ -1063,6 +1087,191 @@ class ModeManager:
                 self.active_modes.remove(text)
 
 
+class CurrentGrid:
+    def __init__(self, simulation, width, height, grid_size, layers=3):
+        self.simulation = simulation
+        self.width = width
+        self.height = height
+        self.grid_size = grid_size
+        self.cols = width // grid_size + 1
+        self.rows = height // grid_size + 1
+        self.layers = layers
+        self.grid = {}
+        
+        self.base_strengths = self.generate_base_strengths()
+        self.target_base_strengths = self.base_strengths.copy()
+        self.base_directions = self.generate_base_directions()
+        self.target_base_directions = self.base_directions.copy()
+        self.layer_boundaries = self.generate_layer_boundaries()
+        self.target_layer_boundaries = [boundary[:] for boundary in self.layer_boundaries]
+        
+        self.base_layer_boundaries = self.generate_layer_boundaries()  # лише один раз
+        self.target_layer_boundaries = [b[:] for b in self.base_layer_boundaries]
+        self.layer_boundaries = [b[:] for b in self.base_layer_boundaries]
+
+        self.initialize_grid()
+
+    def generate_base_strengths(self):
+        max_strength = 0.5
+        min_strength = 0.1
+        strengths = []
+        for layer in range(self.layers):
+            t = layer / (self.layers - 1) if self.layers > 1 else 0
+            strength = max_strength - (max_strength - min_strength) * t
+            strengths.append(strength)
+        return strengths
+
+    def generate_base_directions(self):
+        directions = []
+        min_angle = -math.pi / 2
+        max_angle = math.pi / 2
+        for layer in range(self.layers):
+            t = layer / (self.layers - 1) if self.layers > 1 else 0
+            angle = min_angle + (max_angle - min_angle) * t
+            directions.append(angle)
+        return directions
+
+    def generate_layer_boundaries(self):
+        boundaries = []
+        for layer in range(self.layers + 1):
+            boundary = []
+            base_height = self.height * layer / self.layers
+            current_y = base_height
+            for col in range(self.cols):
+                boundary.append(current_y)
+                current_y += random.uniform(-self.height * 0.01, self.height * 0.01)
+                current_y = max(0, min(self.height, current_y))
+            
+            segment_length = random.randint(self.cols // 10, self.cols // 5)
+            for col in range(1, self.cols):
+                if col % segment_length == 0 or col == self.cols - 1:
+                    delta_y = random.uniform(-self.height * 0.1, self.height * 0.1)
+                    target_y = base_height + delta_y
+                    target_y = max(0, min(self.height, target_y))
+                    start_col = max(0, col - segment_length)
+                    for i in range(start_col, col + 1):
+                        t = (i - start_col) / (col - start_col) if col != start_col else 1
+                        t_smooth = t * t * (3 - 2 * t)
+                        boundary[i] = (1 - t_smooth) * boundary[start_col] + t_smooth * target_y
+                    segment_length = random.randint(self.cols // 10, self.cols // 5)
+            
+            smoothed_boundary = boundary.copy()
+            for col in range(1, self.cols - 1):
+                smoothed_boundary[col] = (boundary[col - 1] + boundary[col] + boundary[col + 1]) / 3
+            smoothed_boundary[0] = boundary[0]
+            smoothed_boundary[-1] = boundary[-1]
+            boundaries.append(smoothed_boundary)
+        
+        for col in range(self.cols):
+            for layer in range(1, self.layers):
+                if boundaries[layer][col] > boundaries[layer + 1][col]:
+                    boundaries[layer][col], boundaries[layer + 1][col] = boundaries[layer + 1][col], boundaries[layer][col]
+        
+        return boundaries
+
+    def get_layer_at(self, x, y):
+        col = int(x // self.grid_size)
+        if col >= self.cols:
+            col = self.cols - 1
+        for layer in range(self.layers):
+            if y <= self.layer_boundaries[layer + 1][col]:
+                return layer
+        return self.layers - 1
+
+    def initialize_grid(self):
+        for row in range(self.rows):
+            y = row * self.grid_size
+            for col in range(self.cols):
+                x = col * self.grid_size
+                layer = self.get_layer_at(x, y)
+                base_direction = self.base_directions[layer] + random.uniform(-math.pi/4, math.pi/4)
+                strength = self.base_strengths[layer] * (1 + random.uniform(-0.15, 0.15))
+                self.grid[(col, row)] = {"strength": strength, "direction": base_direction}
+
+    def update(self, simulation):
+        season = simulation.seasons[simulation.current_season_index]
+        season_modifier = {"Spring": 0.8, "Summer": 1.0, "Autumn": 0.9, "Winter": 0.7}[season]
+        
+        self.update_targets(season)
+        
+        for i in range(self.layers):
+            self.base_strengths[i] += (self.target_base_strengths[i] - self.base_strengths[i]) * 0.01
+            angle_diff = (self.target_base_directions[i] - self.base_directions[i] + math.pi) % (2 * math.pi) - math.pi
+            self.base_directions[i] = (self.base_directions[i] + angle_diff * 0.05) % (2 * math.pi)
+
+        for layer in range(self.layers + 1):
+            for col in range(self.cols):
+                self.layer_boundaries[layer][col] += (self.target_layer_boundaries[layer][col] - self.layer_boundaries[layer][col]) * 0.005
+
+        for row in range(self.rows):
+            y = row * self.grid_size
+            for col in range(self.cols):
+                x = col * self.grid_size
+                layer = self.get_layer_at(x, y)
+                current = self.grid[(col, row)]
+                
+                temp = simulation.get_temperature(x, y)
+                temp_factor = (temp - MIN_TEMP) / (MAX_TEMP - MIN_TEMP)
+                
+                target_direction = (self.base_directions[layer] + 
+                                  math.sin(simulation.time * 0.01 + col * 0.1) * math.pi/8 + 
+                                  random.uniform(-math.pi/8, math.pi/8))
+                target_strength = self.base_strengths[layer] * season_modifier * (1 + temp_factor * 0.3) * (1 + random.uniform(-0.1, 0.1))
+                
+                for algae in simulation.algae_list:
+                    for seg_x, seg_y in algae.segments:
+                        distance = math.hypot(seg_x - x, seg_y - y)
+                        if distance < self.grid_size * 2:
+                            current["strength"] *= (1 - 0.3 * (1 - distance / (self.grid_size * 2)))
+                
+                current["strength"] += (target_strength - current["strength"]) * 0.02
+                angle_diff = (target_direction - current["direction"] + math.pi) % (2 * math.pi) - math.pi
+                current["direction"] += angle_diff * 0.05
+
+    def update_targets(self, season):
+        season_effects = {
+            "Spring": {"strength": 0.4, "direction_shift": -math.pi/6, "boundary_shift": -self.height * 0.05},
+            "Summer": {"strength": 0.5, "direction_shift": 0.0, "boundary_shift": 0.0},
+            "Autumn": {"strength": 0.45, "direction_shift": math.pi/6, "boundary_shift": self.height * 0.03},
+            "Winter": {"strength": 0.35, "direction_shift": -math.pi/4, "boundary_shift": -self.height * 0.07}
+        }
+        
+        effect = season_effects[season]
+        
+        for layer in range(self.layers):
+            t = layer / (self.layers - 1) if self.layers > 1 else 0
+            strength_noise = noise.pnoise1(self.simulation.time * 0.005 + layer, octaves=4) * 0.2
+            direction_noise = noise.pnoise1(self.simulation.time * 0.01 + layer + 10, octaves=4) * math.pi / 4
+            
+            self.target_base_strengths[layer] = effect["strength"] * (1 - t * 0.3) + strength_noise
+            self.target_base_directions[layer] = (self.generate_base_directions()[layer] + 
+                                                effect["direction_shift"] + direction_noise) % (2 * math.pi)
+        
+        for layer in range(self.layers + 1):
+            for col in range(self.cols):
+                base_height = self.base_layer_boundaries[layer][col] + effect["boundary_shift"]
+                noise_value = noise.pnoise2(col * 0.1, self.simulation.time * 0.02 + layer, octaves=4) * self.height * 0.2
+                target = max(0, min(self.height, base_height + noise_value))
+                self.target_layer_boundaries[layer][col] += (target - self.target_layer_boundaries[layer][col]) * 0.02
+        
+        min_gap = self.height * 0.02
+        for col in range(self.cols):
+            for layer in range(1, self.layers):
+                below = self.target_layer_boundaries[layer + 1][col]
+                above = self.target_layer_boundaries[layer][col]
+                if above > below - min_gap:
+                    mid = (above + below) / 2
+                    self.target_layer_boundaries[layer][col] = mid - min_gap / 2
+                    self.target_layer_boundaries[layer + 1][col] = mid + min_gap / 2
+
+    def get_current_at(self, x, y):
+        col = int(x // self.grid_size)
+        row = int(y // self.grid_size)
+        if (col, row) in self.grid:
+            return self.grid[(col, row)]["strength"], self.grid[(col, row)]["direction"]
+        return 0.3, 0.0
+
+
 class Simulation:
     def __init__(self):
         self.event_handler = EventHandler(self)
@@ -1092,7 +1301,7 @@ class Simulation:
         self.prev_season_modifier = 0.8
         self.current_season_modifier = 1.0
 
-        self.grid_size = 4  
+        self.grid_size = 4 
         self.oxygen_grid = {}  
         self.temperature_grid = {} 
         self.last_oxygen_update = -1
@@ -1109,6 +1318,7 @@ class Simulation:
         self.target_vertical_strength = 0.0  
         self.current_change_timer = 0  
         self.current_change_interval = DAY_LENGTH * 3.5
+        self.current_grid = CurrentGrid(self, WIDTH, HEIGHT, 50, layers=5)
 
     @staticmethod
     def create_background(width, height):
@@ -1128,27 +1338,7 @@ class Simulation:
         season_progress = (self.time % self.season_length) / self.season_length
         self.current_season_index = int((self.time // self.season_length) % 4)
         
-        self.current_change_timer += 1
-        if self.current_change_timer >= self.current_change_interval:
-            self.current_change_timer = 0
-            season = self.seasons[self.current_season_index]
-            season_modifier = {"Spring": 0.8, "Summer": 1.0, "Autumn": 0.9, "Winter": 0.7}[season]
-            self.target_strength = random.uniform(0.1, 0.5) * season_modifier
-            
-            base_direction = math.pi/2 if season in ["Spring", "Summer"] else -math.pi/2
-            self.target_direction = base_direction + random.uniform(-math.pi/4, math.pi/4)
-            self.target_vertical_strength = (random.uniform(0.0, 0.2) if season == "Summer" else 
-                                            random.uniform(-0.2, 0.0) if season == "Winter" else 0.0)
-
-        transition_speed = 0.005
-        self.current_strength += (self.target_strength - self.current_strength) * transition_speed
-        
-        angle_diff = self.target_direction - self.current_direction
-        angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi  
-        self.current_direction += angle_diff * transition_speed
-        self.current_direction = self.current_direction % (2 * math.pi)
-
-        self.vertical_current_strength += (self.target_vertical_strength - self.vertical_current_strength) * transition_speed
+        self.current_grid.update(self)
 
         target_season_modifier = {"Spring": 1.0, "Summer": 1.1, "Autumn": 0.9, "Winter": 0.8}[self.seasons[self.current_season_index]]
         transition_duration = self.season_length * 0.1 
