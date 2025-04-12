@@ -5,11 +5,12 @@ import noise
 import tkinter as tk
 from threading import Thread
 import matplotlib.pyplot as plt
+import numpy as np
 from settings import *
 
 pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Fish Simalation")
+pygame.display.set_caption("Fish Simulation")
 clock = pygame.time.Clock()
 
 
@@ -30,7 +31,7 @@ class Algae:
             return
 
         if self.growth_timer > 0:
-            self.growth_timer -= 1
+            self.growth_timer -= 3
             return
 
         top_y = min(seg[1] for seg in self.segments)
@@ -67,13 +68,14 @@ class Algae:
             self.is_alive = False
             for seg_x, seg_y in self.segments[:]:
                 if seg_y < self.base_y - 4:
-                    if random.random() < 0.5:
+                    if random.random() < 0.3:
                         dead_algae_parts.append(DeadAlgaePart(seg_x, seg_y))
             self.segments.clear()
             self.lowest_y = float('inf')
 
         if self.is_alive:
-            self.grow(simulation)
+            if random.random() < 0.6:
+                self.grow(simulation)
             if len(algae_list) < MAX_ALGAE and random.random() < 0.01:
                 new_x = self.root_x + random.randint(-20, 20)
                 if 0 <= new_x <= WIDTH:
@@ -105,7 +107,7 @@ class DeadAlgaePart:
 
     def update(self):
         self.y -= self.float_speed 
-        self.lifetime -= 1
+        self.lifetime -= 2
 
     def draw(self, screen):
         pygame.draw.circle(screen, (0, 125, 0), (int(self.x), int(self.y)), 2)
@@ -123,7 +125,7 @@ class Crustacean:
     def update(self):
         self.x += math.cos(self.direction) * self.speed
         self.y += math.sin(self.direction) * self.speed
-        self.lifetime -= 1
+        self.lifetime -= 2
         if self.x < 0 or self.x > WIDTH:
             self.direction = math.pi - self.direction 
         self.y = max(HEIGHT // 3, min(HEIGHT - 10, self.y))  
@@ -140,7 +142,7 @@ class Plankton:
         self.lifetime = random.randint(PLANKTON_LIFETIME[0], PLANKTON_LIFETIME[1])  
 
     def update(self):
-        self.lifetime -= 1
+        self.lifetime -= 3
 
     def draw(self, screen):
         pygame.draw.circle(screen, (0, 200, 200), (int(self.x), int(self.y)), 2)
@@ -220,6 +222,9 @@ class Fish:
         base_reproduction_age = self.max_size * 0.4
         repro_variation = random.uniform(0.7, 1.3)
         self.min_reproduction_age = base_reproduction_age * repro_variation * (1.5 if self.is_predator else 1.0)
+
+        self.vision_sq_o = self.vision * self.vision
+        self.vision_sq_a = self.vision * self.vision * 0.7 * 0.7
     
     def calculate_traits(self):
         def get_phenotype(trait):
@@ -289,35 +294,34 @@ class Fish:
                         (0.5 if self.is_predator else 1)) * (1 - self.size / 20) + metabolism_phenotype * 0.5
     
     def find_nearest_food(self, algae_list, plankton_list, crustacean_list, dead_algae_parts):
-        effective_vision = self.vision * (0.7 if self.is_in_algae() else 1)  # Зменшення видимості у водоростях
-
         if self.is_predator:
             if not crustacean_list:
                 return None
-            closest_crust = min(crustacean_list, key=lambda c: math.hypot(c.x - self.x, c.y - self.y))
-            distance = math.hypot(closest_crust.x - self.x, closest_crust.y - self.y)
-            return closest_crust if distance < effective_vision else None
+            closest_crust = min(crustacean_list, key=lambda c: (c.x - self.x) ** 2 + (c.y - self.y) ** 2)
+            dist_sq = (closest_crust.x - self.x) ** 2 + (closest_crust.y - self.y) ** 2
+            vision_sq = self.vision_sq_a if self.is_in_algae else self.vision_sq_o
+            return closest_crust if dist_sq < vision_sq else None
         else:
             closest = None
-            min_dist = effective_vision 
+            min_dist_sq = self.vision_sq_a if self.is_in_algae else self.vision_sq_o
             
             for algae in algae_list:
                 for seg_x, seg_y in algae.segments:
-                    dist = math.hypot(seg_x - self.x, seg_y - self.y)
-                    if dist < min_dist:
-                        min_dist = dist
+                    dist_sq = (seg_x - self.x) ** 2 + (seg_y - self.y) ** 2
+                    if dist_sq < min_dist_sq:
+                        min_dist_sq = dist_sq
                         closest = (algae, (seg_x, seg_y))
             
             for plankton in plankton_list:
-                dist = math.hypot(plankton.x - self.x, plankton.y - self.y)
-                if dist < min_dist:
-                    min_dist = dist
+                dist_sq = (plankton.x - self.x) ** 2 + (plankton.y - self.y) ** 2
+                if dist_sq < min_dist_sq:
+                    min_dist_sq = dist_sq
                     closest = plankton
             
             for dead_part in dead_algae_parts:
-                dist = math.hypot(dead_part.x - self.x, dead_part.y - self.y)
-                if dist < min_dist:
-                    min_dist = dist
+                dist_sq = (dead_part.x - self.x) ** 2 + (dead_part.y - self.y) ** 2
+                if dist_sq < min_dist_sq:
+                    min_dist_sq = dist_sq
                     closest = dead_part
             
             return closest
@@ -339,8 +343,9 @@ class Fish:
             prey_in_algae = prey.is_in_algae()
             self_in_algae = self.is_in_algae()
             vision = effective_vision * 0.4 if (prey_in_algae and not self_in_algae) else effective_vision
-            distance = math.hypot(prey.x - self.x, prey.y - self.y)
-            return distance if distance < vision else float('inf')
+            vision_sq_adj = vision * vision
+            dist_sq = (prey.x - self.x) ** 2 + (prey.y - self.y) ** 2
+            return dist_sq if dist_sq < vision_sq_adj else float('inf')
         
         nearest_prey = min(potential_prey, key=effective_distance, default=None)
         return nearest_prey if effective_distance(nearest_prey) != float('inf') else None
@@ -349,7 +354,7 @@ class Fish:
         if not fish_list:
             return None
         
-        effective_mate_vision = self.mate_vision * (0.7 if self.is_in_algae() else 1)  # Зменшення видимості у водоростях
+        effective_mate_vision = self.mate_vision * (0.7 if self.is_in_algae() else 1)
         potential_mates = [f for f in fish_list if f != self and f.ready_to_mate and f.is_predator == self.is_predator and f.is_male != self.is_male]
         
         if not potential_mates:
@@ -359,8 +364,9 @@ class Fish:
             mate_in_algae = mate.is_in_algae()
             self_in_algae = self.is_in_algae()
             vision = effective_mate_vision * 0.4 if (mate_in_algae and not self_in_algae) else effective_mate_vision
-            distance = math.hypot(mate.x - self.x, mate.y - self.y)
-            return distance if distance < vision else float('inf')
+            vision_sq_adj = vision * vision
+            dist_sq = (mate.x - self.x) ** 2 + (mate.y - self.y) ** 2
+            return dist_sq if dist_sq < vision_sq_adj else float('inf')
         
         nearest_mate = min(potential_mates, key=effective_distance, default=None)
         return nearest_mate if effective_distance(nearest_mate) != float('inf') else None
@@ -368,14 +374,18 @@ class Fish:
     def handle_collision(self, other_fish):
         if self.is_dead or other_fish.is_dead:
             return
-
-        distance = math.hypot(self.x - other_fish.x, self.y - other_fish.y)
-        min_distance = self.size + other_fish.size 
         
-        if distance < min_distance and distance > 0: 
+        dx = self.x - other_fish.x
+        dy = self.y - other_fish.y
+        dist_sq = dx * dx + dy * dy
+        min_distance = self.size + other_fish.size
+        min_dist_sq = min_distance * min_distance
+        
+        if dist_sq < min_dist_sq and dist_sq > 0:
+            distance = math.hypot(dx, dy)
             overlap = min_distance - distance
-            direction_x = (self.x - other_fish.x) / distance
-            direction_y = (self.y - other_fish.y) / distance
+            direction_x = dx / distance
+            direction_y = dy / distance
             
             self.x += direction_x * overlap * OVERLAP_THRESHOLD
             self.y += direction_y * overlap * OVERLAP_THRESHOLD
@@ -388,10 +398,11 @@ class Fish:
 
     def is_in_algae(self):
         nearby_algae = self.simulation.get_nearby_algae(self.x, self.y)
+        threshold_sq = (self.size + ALGAE_RAD) ** 2
         for algae in nearby_algae:
             for seg_x, seg_y in algae.segments:
-                distance = math.hypot(self.x - seg_x, self.y - seg_y)
-                if distance < self.size + ALGAE_RAD:
+                dist_sq = (self.x - seg_x) ** 2 + (self.y - seg_y) ** 2
+                if dist_sq < threshold_sq:
                     return True
         return False
 
@@ -479,7 +490,8 @@ class Fish:
         # 3. Полювання/пошук їжі
         # 4. Випадковий рух у спокої або рух до preferred_depth
 
-        if nearest_predator and math.hypot(nearest_predator.x - self.x, nearest_predator.y - self.y) < effective_vision * 1.5:
+        vision_sq = self.vision_sq_a if self.is_in_algae else self.vision_sq_o
+        if nearest_predator and (nearest_predator.x - self.x) ** 2 + (nearest_predator.y - self.y) ** 2 < vision_sq:
             desired_angle = math.atan2(self.y - nearest_predator.y, self.x - nearest_predator.x)
             angle_diff = desired_angle - self.direction
             angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
@@ -491,8 +503,9 @@ class Fish:
             self.x += math.cos(self.direction) * effective_speed * 1.2
             self.y += math.sin(self.direction) * effective_speed * 1.2
 
-        elif (self.ready_to_mate and target_mate and 
+        elif (self.ready_to_mate and target_mate and
             math.hypot(target_mate.x - self.x, target_mate.y - self.y) < self.mate_vision):
+
             desired_angle = math.atan2(target_mate.y - self.y, target_mate.x - self.x)
             angle_diff = desired_angle - self.direction
             angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
@@ -548,7 +561,7 @@ class Fish:
                 self.y += math.sin(self.direction) * effective_speed
         else:
             depth_difference = abs(self.y - self.preferred_depth)
-            if depth_difference > self.preferred_depth_range and random.random() < 0.2:  
+            if depth_difference > self.preferred_depth_range and self.simulation.get_random() < 0.2:  
                 desired_angle = math.atan2(self.preferred_depth - self.y, 10)
                 angle_diff = desired_angle - self.direction
                 angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
@@ -560,12 +573,12 @@ class Fish:
                 idle_speed = effective_speed * 0.4  
             else:
                 if self.y > (LINE_LEVEL - random.randint(-10, 10)):
-                    if random.random() < 0.7:  
+                    if self.simulation.get_random() < 0.7:  
                         self.direction = random.uniform(-math.pi / 6, 0)  
                     else:  
                         self.direction += random.uniform(-self.turn_speed * 0.2, self.turn_speed * 0.2)
 
-                elif random.random() < 0.15: 
+                elif self.simulation.get_random() < 0.15: 
                     self.direction += random.uniform(-self.turn_speed * 0.2, self.turn_speed * 0.2)
 
                 idle_speed = effective_speed * 0.2 
@@ -573,11 +586,9 @@ class Fish:
             self.x += math.cos(self.direction) * idle_speed
             self.y += math.sin(self.direction) * idle_speed
 
-            # self.direction = max(-math.pi/2, min(math.pi/2, self.direction))
-
-        if random.random() < 0.25:
+        if self.simulation.get_random() < 0.25:
             self.direction += random.uniform(-self.turn_speed * 0.1, self.turn_speed * 0.1)
-        elif in_algae and random.random() < 0.25:
+        elif in_algae and self.simulation.get_random() < 0.25:
             self.direction += random.uniform(-self.turn_speed * 0.3, -self.turn_speed * 0.1)
 
         # Обробка колізій з іншими рибами
@@ -603,21 +614,23 @@ class Fish:
     def eat(self, fish_list):
         if self.is_dead or self.energy >= MAX_ENERGY * 0.95:
             return
-
+        
         sim = self.simulation
-
+        threshold_sq = (self.size + 5) ** 2
+        
         if self.is_predator:
             for crust in sim.crustacean_list[:]:
-                distance = math.hypot(self.x - crust.x, self.y - crust.y)
-                if distance < self.size + 5:
+                dist_sq = (self.x - crust.x) ** 2 + (self.y - crust.y) ** 2
+                if dist_sq < threshold_sq:
                     energy_gain = crust.energy_value * (0.5 + self.digestion * 0.5)
                     self.energy = min(MAX_ENERGY, self.energy + energy_gain)
                     sim.crustacean_list.remove(crust)
-
+            
             for prey in fish_list[:]:
                 if prey != self:
-                    distance = math.hypot(self.x - prey.x, self.y - prey.y)
-                    if distance < self.size + prey.size:
+                    dist_sq = (self.x - prey.x) ** 2 + (self.y - prey.y) ** 2
+                    prey_size_sq = (self.size + prey.size) ** 2
+                    if dist_sq < prey_size_sq:
                         if prey.is_dead:
                             energy_gain = prey.energy * (0.5 + self.digestion * 0.5) * 0.7
                             self.energy = min(MAX_ENERGY, self.energy + energy_gain)
@@ -625,11 +638,11 @@ class Fish:
                             fish_list.remove(prey)
                         elif not prey.is_predator:
                             escape_chance = prey.defense * 0.35
-                            if random.random() >= escape_chance:
+                            if self.simulation.get_random() >= escape_chance:
                                 energy_gain = prey.energy * (0.5 + self.digestion * 0.5)
                                 self.energy = min(MAX_ENERGY, self.energy + energy_gain)
                                 fish_list.remove(prey)
-                                if random.random() < prey.defense * 0.2:
+                                if self.simulation.get_random() < prey.defense * 0.2:
                                     # Невдача з можливим ушкодженням хижака
                                     self.energy -= 5
                             else:
@@ -637,11 +650,11 @@ class Fish:
 
                         elif prey.is_predator and prey.size + EAT_SIZE < self.size:
                             escape_chance = prey.defense * 0.35
-                            if random.random() >= escape_chance:
+                            if self.simulation.get_random() >= escape_chance:
                                 energy_gain = prey.energy * (0.5 + self.digestion * 0.5)
                                 self.energy = min(MAX_ENERGY, self.energy + energy_gain)
                                 fish_list.remove(prey)
-                                if random.random() < prey.defense * 0.2:
+                                if self.simulation.get_random() < prey.defense * 0.2:
                                     # Невдача з можливим ушкодженням хижака
                                     self.energy -= 5
                             else:
@@ -649,8 +662,8 @@ class Fish:
         else:
             for algae in sim.algae_list[:]:
                 for i, (seg_x, seg_y) in enumerate(algae.segments[:]):
-                    distance = math.hypot(self.x - seg_x, self.y - seg_y)
-                    if distance < self.size + 5:
+                    dist_sq = (self.x - seg_x) ** 2 + (self.y - seg_y) ** 2
+                    if dist_sq < threshold_sq:
                         energy_gain = 3 * (0.5 + self.digestion * 0.5)
                         self.energy = min(MAX_ENERGY, self.energy + energy_gain)
                         algae.segments.pop(i)
@@ -676,7 +689,7 @@ class Fish:
     def check_mating_readiness(self):
         if not self.is_dead:
             self.ready_to_mate = (self.energy > self.energy_threshold and 
-                                random.random() < self.reproduction_rate * (0.7 + self.digestion * 0.3) *
+                                self.simulation.get_random() < self.reproduction_rate * (0.7 + self.digestion * 0.3) *
                                 (1 - self.defense * 0.2) and self.age >= self.min_reproduction_age)
             
     def mate(self, partner):
@@ -686,8 +699,9 @@ class Fish:
             self.age < self.min_reproduction_age or partner.age < partner.min_reproduction_age):
             return None
         
-        distance = math.hypot(self.x - partner.x, self.y - partner.y)
-        if distance > (self.size + partner.size) * 2 or self.energy < 30 or partner.energy < 30:
+        dist_sq = (self.x - partner.x) ** 2 + (self.y - partner.y) ** 2
+        threshold_sq = ((self.size + partner.size) * 2) ** 2
+        if dist_sq > threshold_sq or self.energy < 35 or partner.energy < 35:
             return None
         
         child_genome = {}
@@ -697,20 +711,20 @@ class Fish:
             self_dom = self.genome[key]["dominance"]
             partner_dom = partner.genome[key]["dominance"]
             
-            if random.random() < 0.7:
+            if self.simulation.get_random() < 0.7:
                 self_allele = self_alleles[self_dom]
             else:
                 self_allele = random.choice(self_alleles)
-
-            if random.random() < 0.7:
+                
+            if self.simulation.get_random() < 0.7:
                 partner_allele = partner_alleles[partner_dom]
             else:
                 partner_allele = random.choice(partner_alleles)
             
             mutation_range = 0.005 if key == 'predator' else 0.15
-            if random.random() < MUTATION_RATE:
+            if self.simulation.get_random() < MUTATION_RATE:
                 self_allele = max(0, min(1, self_allele + random.uniform(-mutation_range, mutation_range)))
-            if random.random() < MUTATION_RATE:
+            if self.simulation.get_random() < MUTATION_RATE:
                 partner_allele = max(0, min(1, partner_allele + random.uniform(-mutation_range, mutation_range)))
                 
             child_genome[key] = {
@@ -718,7 +732,7 @@ class Fish:
                 "dominance": random.choice([0, 1])
             }
         
-        energy_cost = 30 * (1 + self.metabolism * 0.5)
+        energy_cost = 30 * (1 + self.metabolism * 0.35)
         self.energy -= energy_cost
         partner.energy -= energy_cost
         self.ready_to_mate = False
@@ -918,8 +932,9 @@ class EventHandler:
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_x, mouse_y = pygame.mouse.get_pos()
                 for fish in self.simulation.fish_population:
-                    distance = math.hypot(fish.x - mouse_x, fish.y - mouse_y)
-                    if distance < fish.size + 5:
+                    dist_sq = (fish.x - mouse_x) ** 2 + (fish.y - mouse_y) ** 2
+                    threshold_sq = (fish.size + 5) ** 2
+                    if dist_sq < threshold_sq:
                         FishDetailsWindow(self.simulation, fish)
                         break
                 
@@ -1356,11 +1371,9 @@ class Simulation:
         self.prev_season_modifier = 0.8
         self.current_season_modifier = 1.0
 
-        self.grid_size = 4 
+        self.grid_size = 10
         self.oxygen_grid = {}  
         self.temperature_grid = {} 
-        self.last_oxygen_update = -1
-        self.last_temperature_update = -1
 
         # Ініціалізація течії
         self.current_strength = 0.3  
@@ -1383,6 +1396,16 @@ class Simulation:
 
         self.algae_grid = {} 
         self.grid_cell_size = 50
+
+        self.random_buffer = [random.random() for _ in range(1000)]
+        self.random_index = 0
+        self.frame_counter = 0
+
+    def get_random(self):
+        self.random_index = (self.random_index + 1) % len(self.random_buffer)
+        if self.random_index == 0:
+            self.random_buffer = [random.random() for _ in range(1000)]
+        return self.random_buffer[self.random_index]
 
     def add_to_grid(self, algae):
         grid_x = int(algae.root_x // self.grid_cell_size)
@@ -1423,18 +1446,19 @@ class Simulation:
             self.update_temperature_grid()
             return
 
+        self.random_buffer.append(random.random())
         for algae in self.algae_list:
-            if algae.is_alive and random.random() < 0.6:
+            if algae.is_alive and self.get_random() < 0.2:
                 algae.grow(self)
                 algae.growth_timer = min(algae.growth_timer, random.randint(ALGAE_GROW[0] // 2, ALGAE_GROW[1] // 2))
 
-        if len(self.plankton_list) < INITIAL_PLANKTON and random.random() < 0.05: 
+        if len(self.plankton_list) < INITIAL_PLANKTON and self.get_random() < 0.05: 
             self.plankton_list.append(Plankton(random.randint(0, WIDTH), random.randint(0, int(HEIGHT/1.5))))
 
-        if len(self.crustacean_list) < INITIAL_CRUSTACEANS and random.random() < 0.02:  
+        if len(self.crustacean_list) < INITIAL_CRUSTACEANS and self.get_random() < 0.02:  
             self.crustacean_list.append(Crustacean(random.randint(0, WIDTH), random.randint(int(HEIGHT / 3), HEIGHT)))
 
-        if len(self.fish_population) < NUM_FISH and random.random() < 0.1:  
+        if len(self.fish_population) < NUM_FISH and self.get_random() < 0.1:  
             self.fish_population.append(Fish(random.randint(0, WIDTH), random.randint(0, LINE_LEVEL - random.randint(0, 20)),
                                             self, random.randint(40, 60)))
 
@@ -1484,8 +1508,8 @@ class Simulation:
 
     def update_temperature_grid(self):
         self.temperature_grid.clear()
-        grid_width = WIDTH // self.grid_size + 1
-        grid_height = HEIGHT // self.grid_size + 1
+        grid_width = WIDTH // self.grid_size 
+        grid_height = HEIGHT // self.grid_size
 
         for gy in range(grid_height):
             y = gy * self.grid_size
@@ -1503,12 +1527,7 @@ class Simulation:
         for (gx, gy), temp in self.temperature_grid.items():
             self.temperature_grid[(gx, gy)] = temp * day_night_modifier * season_modifier
 
-        self.last_temperature_update = self.time
-
     def get_temperature(self, x, y):
-        if self.time != self.last_temperature_update:
-            self.update_temperature_grid()
-
         gx = int(x // self.grid_size)
         gy = int(y // self.grid_size)
         
@@ -1516,8 +1535,8 @@ class Simulation:
 
     def update_oxygen_grid(self):
         self.oxygen_grid.clear()
-        grid_width = WIDTH // self.grid_size + 1
-        grid_height = HEIGHT // self.grid_size + 1
+        grid_width = WIDTH // self.grid_size
+        grid_height = HEIGHT // self.grid_size 
 
         for gy in range(grid_height):
             y = gy * self.grid_size
@@ -1550,12 +1569,7 @@ class Simulation:
                                     MAX_OXYGEN, self.oxygen_grid[(grid_x, grid_y)] + boost
                                 )
 
-        self.last_oxygen_update = self.time
-
     def get_oxygen(self, x, y, algae_list):
-        if self.time != self.last_oxygen_update:
-            self.update_oxygen_grid()
-
         gx = int(x // self.grid_size)
         gy = int(y // self.grid_size)
         
@@ -1573,29 +1587,31 @@ class Simulation:
             if not self.paused:
                 self.update_time()
                 self.plot.update()
+                self.update_temperature_grid()
+                self.update_oxygen_grid()
 
-                if len(self.fish_population) < 1:
+                if len([f for f in self.fish_population if not f.is_dead]) < 1:
                     self.plot.show()
 
                 season = self.seasons[self.current_season_index]
                 spawn_rate_modifier = {"Spring": 1.1, "Summer": 1.2, "Autumn": 0.9, "Winter": 0.7}[season]
 
-                if random.random() < 0.3 * spawn_rate_modifier:
-                    if random.random() < 0.01:
+                if self.get_random() < 0.3 * spawn_rate_modifier:
+                    if self.get_random() < 0.007 and len(self.algae_list) < MAX_ALGAE:
                         new_x = random.randint(0, WIDTH)
                         new_algae = Algae(new_x, HEIGHT)
                         self.algae_list.append(new_algae)
                         self.add_to_grid(new_algae)
-                    elif random.random() < 0.4:
+                    elif self.get_random() < 0.3:
                         self.plankton_list.append(Plankton(random.randint(0, WIDTH), random.randint(0, int(HEIGHT/1.5))))
-                    elif random.random() < 0.1:
+                    elif self.get_random() < 0.1:
                         self.crustacean_list.append(Crustacean(random.randint(0, WIDTH), random.randint(int(HEIGHT / 3), HEIGHT)))
 
                 new_fish = []
                 for fish in self.fish_population[:]:
                     fish.check_mating_readiness()
 
-                    predators = [f for f in self.fish_population if f.is_predator and not f.is_dead]  # Локальний список хижаків
+                    predators = [f for f in self.fish_population if f.is_predator and not f.is_dead] 
 
                     fish.move(predators, self.fish_population)
                     fish.eat(self.fish_population)
@@ -1613,26 +1629,30 @@ class Simulation:
 
                 self.fish_population.extend(new_fish)
 
-                for algae in self.algae_list[:]:
-                    algae.update(self.algae_list, self.dead_algae_parts, self)
-                    if not algae.segments:
-                        self.algae_list.remove(algae)
+                if self.frame_counter % 3 == 0:
+                    for algae in self.algae_list[:]:
+                        algae.update(self.algae_list, self.dead_algae_parts, self)
+                        if not algae.segments:
+                            self.algae_list.remove(algae)
 
-                for crust in self.crustacean_list[:]:
-                    crust.update()
-                    if crust.lifetime <= 0:
-                        self.crustacean_list.remove(crust)
+                    for plankton in self.plankton_list[:]:
+                        plankton.update()
+                        if plankton.lifetime <= 0:
+                            self.plankton_list.remove(plankton)
 
-                for plankton in self.plankton_list[:]:
-                    plankton.update()
-                    if plankton.lifetime <= 0:
-                        self.plankton_list.remove(plankton)
+                if self.frame_counter % 2 == 0:
+                    for dead_part in self.dead_algae_parts[:]:
+                        dead_part.update()
+                        if dead_part.lifetime <= 0 or dead_part.y <= 0:
+                            self.dead_algae_parts.remove(dead_part)
+                    
+                    for crust in self.crustacean_list[:]:
+                        crust.update()
+                        if crust.lifetime <= 0:
+                            self.crustacean_list.remove(crust)
 
-                for dead_part in self.dead_algae_parts[:]:
-                    dead_part.update()
-                    if dead_part.lifetime <= 0 or dead_part.y <= 0:
-                        self.dead_algae_parts.remove(dead_part)
-            
+                self.frame_counter += 1
+
             if not self.is_generating:
                 for algae in self.algae_list:
                     algae.draw(screen)
