@@ -187,7 +187,6 @@ class Fish:
         self.mate_vision = self.vision * 1.5 
         self.ready_to_mate = False
         self.is_dead = False
-        # self.float_speed = ((7 / (self.size * 2 + 0.5)) * 1.4 + 0.2) / 5
         self.float_speed = 1.5 / (1 + self.size)
         
         # Статевий диморфізм
@@ -225,6 +224,14 @@ class Fish:
 
         self.vision_sq_o = self.vision * self.vision
         self.vision_sq_a = self.vision * self.vision * 0.7 * 0.7
+
+        self.is_pregnant = False
+        self.pregnancy_timer = 0
+        self.pregnancy_duration = random.randint(250, 350) if self.is_predator else random.randint(100, 200)
+        self.pregnancy_energy_cost = 0.1 if self.is_predator else 0.05
+        self.child_genome = None
+        self.after_birth_period = 0
+        self.after_birth_duration = random.randint(100, 150) if self.is_predator else random.randint(50, 80)
     
     def calculate_traits(self):
         def get_phenotype(trait):
@@ -236,6 +243,22 @@ class Fish:
                 return alleles[1] * 0.75 + alleles[0] * 0.25
 
         self.is_predator = get_phenotype("predator") > 0.5
+
+        if self.is_predator:
+            if self.genome["predator"]["alleles"][0] > self.genome["predator"]["alleles"][1] \
+                and self.genome["predator"]["alleles"][1] < 0.5:
+                self.genome["predator"]["alleles"][1] = 0.5
+            elif self.genome["predator"]["alleles"][1] > self.genome["predator"]["alleles"][0] \
+                and self.genome["predator"]["alleles"][0] < 0.5:
+                self.genome["predator"]["alleles"][0] = 0.5
+        else:
+            if self.genome["predator"]["alleles"][0] > self.genome["predator"]["alleles"][1] \
+                and self.genome["predator"]["alleles"][0] > 0.5:
+                self.genome["predator"]["alleles"][0] = 0.49
+            elif self.genome["predator"]["alleles"][1] > self.genome["predator"]["alleles"][0] \
+                and self.genome["predator"]["alleles"][1] > 0.5:
+                self.genome["predator"]["alleles"][1] = 0.49
+
         self.speed = get_phenotype("speed") * (1.5 if self.is_predator else 2.5)
         self.max_size = get_phenotype("size") * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
         self.vision = get_phenotype("vision") * (100 if self.is_predator else 60) + (50 if self.is_predator else 30)
@@ -351,7 +374,7 @@ class Fish:
         return nearest_prey if effective_distance(nearest_prey) != float('inf') else None
         
     def find_nearest_mate(self, fish_list, algae_list):
-        if not fish_list:
+        if not fish_list or self.is_pregnant or self.is_dead:
             return None
         
         effective_mate_vision = self.mate_vision * (0.7 if self.is_in_algae() else 1)
@@ -572,13 +595,20 @@ class Fish:
                 self.direction = self.direction % (2 * math.pi)
                 idle_speed = effective_speed * 0.4  
             else:
-                if self.y > (LINE_LEVEL - random.randint(-10, 10)):
+                if self.y > LINE_LEVEL and not self.is_pregnant:
                     if self.simulation.get_random() < 0.7:  
                         self.direction = random.uniform(-math.pi / 6, 0)  
                     else:  
                         self.direction += random.uniform(-self.turn_speed * 0.2, self.turn_speed * 0.2)
 
+                elif self.is_pregnant and self.y < LINE_LEVEL and not in_algae:
+                    if self.simulation.get_random() < 0.7:  
+                        self.direction = random.uniform(math.pi / 2, 3 * math.pi / 2)
+                    else:  
+                        self.direction += random.uniform(-self.turn_speed * 0.2, self.turn_speed * 0.2)
+
                 elif self.simulation.get_random() < 0.15: 
+
                     self.direction += random.uniform(-self.turn_speed * 0.2, self.turn_speed * 0.2)
 
                 idle_speed = effective_speed * 0.2 
@@ -609,6 +639,7 @@ class Fish:
         if effective_metabolism > self.digestion + 0.3:
             energy_cost *= 1.15
         energy_cost += self.defense_cost
+        energy_cost += self.pregnancy_energy_cost if self.is_pregnant else 0
         self.energy -= energy_cost
         
     def eat(self, fish_list):
@@ -687,7 +718,11 @@ class Fish:
                     sim.dead_algae_parts.remove(dead_part)
     
     def check_mating_readiness(self):
-        if not self.is_dead:
+        if self.after_birth_period > 0:
+            self.after_birth_period -= 1
+            return None
+        
+        if not self.is_dead and not self.is_pregnant:
             self.ready_to_mate = (self.energy > self.energy_threshold and 
                                 self.simulation.get_random() < self.reproduction_rate * (0.7 + self.digestion * 0.3) *
                                 (1 - self.defense * 0.2) and self.age >= self.min_reproduction_age)
@@ -721,25 +756,58 @@ class Fish:
             else:
                 partner_allele = random.choice(partner_alleles)
             
-            mutation_range = 0.005 if key == 'predator' else 0.15
-            if self.simulation.get_random() < MUTATION_RATE:
+            mutation_range = 0.15
+            
+            if self.simulation.get_random() < MUTATION_RATE and key != "predator":
                 self_allele = max(0, min(1, self_allele + random.uniform(-mutation_range, mutation_range)))
-            if self.simulation.get_random() < MUTATION_RATE:
+            if self.simulation.get_random() < MUTATION_RATE and key != "predator":
                 partner_allele = max(0, min(1, partner_allele + random.uniform(-mutation_range, mutation_range)))
-                
+
             child_genome[key] = {
                 "alleles": [self_allele, partner_allele],
                 "dominance": random.choice([0, 1])
             }
         
-        energy_cost = 30 * (1 + self.metabolism * 0.35)
-        self.energy -= energy_cost
-        partner.energy -= energy_cost
+        energy_cost = 30 * (1 + self.metabolism * 0.25)
+
+        if not self.is_male:
+            self.is_pregnant = True
+            self.child_genome = child_genome
+        else:
+            partner.is_pregnant = True
+            self.child_genome = child_genome
+
+        self.energy -= energy_cost if not self.is_pregnant else energy_cost * 0.6
+        partner.energy -= energy_cost if not partner.is_pregnant else energy_cost * 0.6
         self.ready_to_mate = False
         partner.ready_to_mate = False
         
-        return Fish(self.x, self.y, self.simulation, 30, child_genome)
+        return None
     
+    def give_birth(self):
+        if self.is_dead or not self.is_pregnant:
+            return None
+        
+        if self.pregnancy_timer < self.pregnancy_duration:
+            self.pregnancy_timer += 1
+            return None
+        
+        self.is_pregnant = False
+        self.pregnancy_timer = 0
+
+        kids_num = random.randint(1, 3)
+        if self.is_predator:
+            kids_num = min(kids_num, 2)
+        
+        kids = []
+        for _ in range(kids_num):
+            kids.append(Fish(self.x, self.y, self.simulation, 30, self.child_genome))
+
+        self.child_genome = None
+        self.energy -= 5 * (1 + self.metabolism * 0.25)
+        self.after_birth_period = self.after_birth_duration
+        return kids
+
     def draw(self, screen, show_vision, show_targets):
         # Відображення зони видимості
         if show_vision:
@@ -774,6 +842,7 @@ class Fish:
             elif self.nearest_mate and self.ready_to_mate and math.hypot(self.nearest_mate.x - self.x, self.nearest_mate.y - self.y) < self.mate_vision:
                 pygame.draw.line(screen, (255, 255, 0), (int(self.x), int(self.y)), (int(self.nearest_mate.x), int(self.nearest_mate.y)))
 
+        # Відображення риби
         if self.is_dead:
             pygame.draw.circle(screen, (100, 100, 100), (int(self.x), int(self.y)), int(self.size))
         else:
@@ -781,6 +850,8 @@ class Fish:
                 pygame.draw.circle(screen, (255, 0, 0), (int(self.x), int(self.y)), int(self.size) + 2, 1)
             if self.ready_to_mate:
                 pygame.draw.circle(screen, (255, 255, 0), (int(self.x), int(self.y)), int(self.size) + 3, 1)
+            if self.is_pregnant:
+                pygame.draw.circle(screen, (255, 255, 255), (int(self.x), int(self.y)), int(self.size) + 4, 1)
             if self.is_male:
                 pygame.draw.circle(screen, (0, 0, 255), (int(self.x), int(self.y)), int(self.size) + 1, 2)
             else:
@@ -847,6 +918,18 @@ class FishDetailsWindow:
                     text=f"Status: {'Dead' if self.fish.is_dead else 'Alive'}",
                     font=("Arial", 12), bg='#242424', fg='#5E9F61'
             ).pack(pady=5)
+
+            if self.fish.is_pregnant:
+                tk.Label(left_frame, 
+                        text=f"Pregnant ({self.fish.pregnancy_timer}/{self.fish.pregnancy_duration})",
+                        font=("Arial", 12), bg='#242424', fg='#5E9F61'
+                ).pack(pady=5)
+            
+            if self.fish.after_birth_period > 0:
+                tk.Label(left_frame, 
+                        text=f"After birth period: {self.fish.after_birth_period}",
+                        font=("Arial", 12), bg='#242424', fg='#5E9F61'
+                ).pack(pady=5)
 
             right_frame = tk.Frame(self.window, bg='#242424')
             right_frame.pack(side=tk.LEFT, padx=0, pady=10, fill=tk.BOTH, expand=True)
@@ -971,7 +1054,8 @@ class UI:
 
         stats = self.font.render(f"Fish: {len([f for f in sim.fish_population if not f.is_dead])} "
                             f"Algae: {len(sim.algae_list)} Plankton: {len(sim.plankton_list)} "
-                            f"Crustaceans: {len(sim.crustacean_list)} Dead Parts: {len(sim.dead_algae_parts)}", 
+                            f"Crustaceans: {len(sim.crustacean_list)} Dead Parts: {len(sim.dead_algae_parts)} "
+                            f"Pregnants: {len([f for f in sim.fish_population if f.is_pregnant])} ", 
                             True, (255, 255, 255))
         screen.blit(stats, (10, 10))
 
@@ -1615,10 +1699,14 @@ class Simulation:
 
                     fish.move(predators, self.fish_population)
                     fish.eat(self.fish_population)
-                    
+                    kids = fish.give_birth()
+
+                    if kids:
+                        for kid in kids:
+                            new_fish.append(kid)
+
                     if fish.ready_to_mate and fish.nearest_mate:
-                        if baby := fish.mate(fish.nearest_mate):
-                            new_fish.append(baby)
+                        fish.mate(fish.nearest_mate)
                     
                     if fish.energy <= 0 and not fish.is_dead:
                         fish.is_dead = True
