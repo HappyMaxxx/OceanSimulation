@@ -241,6 +241,7 @@ class Fish:
         self.after_birth_period = 0
         self.after_birth_duration = random.randint(PREDATOR_AFTER_BIRTH_DUR[0], PREDATOR_AFTER_BIRTH_DUR[1]) \
             if self.is_predator else random.randint(PREY_AFTER_BIRTH_DUR[0], PREY_AFTER_BIRTH_DUR[1])
+        self.kids_num = None
     
     def calculate_traits(self):
         def get_phenotype(trait):
@@ -750,44 +751,53 @@ class Fish:
         if dist_sq > threshold_sq or self.energy < self.max_energy * 0.2 or partner.energy < partner.max_energy * 0.2:
             return None
         
-        child_genome = {}
-        for key in self.genome:
-            self_alleles = self.genome[key]["alleles"]
-            partner_alleles = partner.genome[key]["alleles"]
-            self_dom = self.genome[key]["dominance"]
-            partner_dom = partner.genome[key]["dominance"]
-            
-            if self.simulation.get_random() < 0.7:
-                self_allele = self_alleles[self_dom]
-            else:
-                self_allele = random.choice(self_alleles)
-                
-            if self.simulation.get_random() < 0.7:
-                partner_allele = partner_alleles[partner_dom]
-            else:
-                partner_allele = random.choice(partner_alleles)
-            
-            mutation_range = 0.15
-            
-            if self.simulation.get_random() < MUTATION_RATE and key != "predator":
-                self_allele = max(0, min(1, self_allele + random.uniform(-mutation_range, mutation_range)))
-            if self.simulation.get_random() < MUTATION_RATE and key != "predator":
-                partner_allele = max(0, min(1, partner_allele + random.uniform(-mutation_range, mutation_range)))
+        if not self.is_male:
+            kids_num = self.kids_num = random.randint(1, 2) if self.is_predator else random.randint(1, 3)
+        else:
+            kids_num = partner.kids_num = random.randint(1, 2) if partner.is_predator else random.randint(1, 3)
 
-            child_genome[key] = {
-                "alleles": [self_allele, partner_allele],
-                "dominance": random.choice([0, 1])
-            }
+        kid_genomes = []
+        for _ in range(kids_num):
+            child_genome = {}
+            for key in self.genome:
+                self_alleles = self.genome[key]["alleles"]
+                partner_alleles = partner.genome[key]["alleles"]
+                self_dom = self.genome[key]["dominance"]
+                partner_dom = partner.genome[key]["dominance"]
+                
+                if self.simulation.get_random() < 0.7:
+                    self_allele = self_alleles[self_dom]
+                else:
+                    self_allele = random.choice(self_alleles)
+                    
+                if self.simulation.get_random() < 0.7:
+                    partner_allele = partner_alleles[partner_dom]
+                else:
+                    partner_allele = random.choice(partner_alleles)
+                
+                mutation_range = 0.15
+                
+                if self.simulation.get_random() < MUTATION_RATE and key != "predator":
+                    self_allele = max(0, min(1, self_allele + random.uniform(-mutation_range, mutation_range)))
+                if self.simulation.get_random() < MUTATION_RATE and key != "predator":
+                    partner_allele = max(0, min(1, partner_allele + random.uniform(-mutation_range, mutation_range)))
+
+                child_genome[key] = {
+                    "alleles": [self_allele, partner_allele],
+                    "dominance": random.choice([0, 1])
+                }
+
+            kid_genomes.append(child_genome)
         
-        base_energy_cost = self.max_energy * 0.25  
+        base_energy_cost = self.max_energy * 0.25 
         energy_cost = base_energy_cost * (1 + self.metabolism * 0.25)
 
         if not self.is_male:
             self.is_pregnant = True
-            self.child_genome = child_genome
+            self.child_genome = kid_genomes
         else:
             partner.is_pregnant = True
-            partner.child_genome = child_genome
+            partner.child_genome = kid_genomes
 
         self.energy -= energy_cost if not self.is_pregnant else energy_cost * 0.6
         partner.energy -= energy_cost if not partner.is_pregnant else energy_cost * 0.6
@@ -806,18 +816,16 @@ class Fish:
         
         self.is_pregnant = False
         self.pregnancy_timer = 0
-
-        kids_num = random.randint(1, 3)
-        if self.is_predator:
-            kids_num = min(kids_num, 2)
         
         kids = []
-        for _ in range(kids_num):
-            kids.append(Fish(self.x, self.y, self.simulation, 30, self.child_genome))
+        for i in range(self.kids_num):
+            kids.append(Fish(self.x, self.y, self.simulation, 30, self.child_genome[i]))
 
         self.child_genome = None
+        self.kids_num = None
         self.energy -= 5 * (1 + self.metabolism * 0.25)
         self.after_birth_period = self.after_birth_duration
+
         return kids
 
     def draw(self, screen, show_vision, show_targets):
