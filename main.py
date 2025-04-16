@@ -5,7 +5,7 @@ import noise
 import tkinter as tk
 from threading import Thread
 import matplotlib.pyplot as plt
-import numpy as np
+import cProfile
 from settings import *
 
 pygame.init()
@@ -21,7 +21,7 @@ class Algae:
         self.segments = [(x, base_y)]
         self.lowest_y = base_y 
         self.energy_value = 10
-        self.growth_timer = random.randint(ALGAE_GROW[0], ALGAE_GROW[1])
+        self.growth_timer = round(random.uniform(*ALGAE_GROW))
         self.max_height = random.randint(int(HEIGHT * 0.3), int(HEIGHT * 0.5))
         self.branch_chance = 0.1
         self.is_alive = True
@@ -58,7 +58,7 @@ class Algae:
             if branch_y < self.lowest_y:
                 self.lowest_y = branch_y  
 
-        self.growth_timer = random.randint(ALGAE_GROW[0], ALGAE_GROW[1])
+        self.growth_timer = round(random.uniform(*ALGAE_GROW))
     
     def check_root(self):
         return any(seg[1] >= self.base_y - 4 for seg in self.segments[:5])
@@ -103,9 +103,15 @@ class DeadAlgaePart:
         self.y = y
         self.energy_value = random.randint(2, 5) 
         self.float_speed = random.uniform(0.2, 0.5)  
-        self.lifetime = random.randint(DEAD_ALGAE_LIFETIME[0], DEAD_ALGAE_LIFETIME[1])  
+        self.lifetime = round(random.uniform(*DEAD_ALGAE_LIFETIME))
 
     def update(self):
+        strength, direction = sim.current_grid.get_current_at(self.x, self.y)
+        current_x = strength * math.cos(direction)
+        current_y = strength * math.sin(direction)
+        
+        self.x += current_x * 1.15 
+        self.y += current_y * 1.15 - (self.float_speed * 1.2 - 0.02)
         self.y -= self.float_speed 
         self.lifetime -= 2
 
@@ -120,7 +126,7 @@ class Crustacean:
         self.energy_value = random.randint(25, 40)
         self.speed = random.uniform(0.5, 1.0)
         self.direction = random.uniform(0, 2 * math.pi)
-        self.lifetime = random.randint(CRUSTACEAN_LIFETIME[0], CRUSTACEAN_LIFETIME[1]) 
+        self.lifetime = round(random.uniform(*CRUSTACEAN_LIFETIME))
 
     def update(self):
         self.x += math.cos(self.direction) * self.speed
@@ -139,13 +145,51 @@ class Plankton:
         self.x = x
         self.y = y
         self.energy_value = random.randint(3, 7)  
-        self.lifetime = random.randint(PLANKTON_LIFETIME[0], PLANKTON_LIFETIME[1])  
+        self.lifetime = round(random.uniform(*PLANKTON_LIFETIME))
 
     def update(self):
         self.lifetime -= 3
 
     def draw(self, screen):
         pygame.draw.circle(screen, (0, 200, 200), (int(self.x), int(self.y)), 2)
+
+
+class Egg:
+    def __init__(self, x, y, simulation, genome, incubation_time, survival_chance):
+        self.x = x
+        self.y = y
+        self.simulation = simulation
+        self.genome = genome
+        self.incubation_time = incubation_time  
+        self.survival_chance = survival_chance  
+        self.energy_value = random.randint(2, 5) 
+        self.lifetime = incubation_time
+        self.float_speed = random.uniform(0.1, 0.3)  
+
+    def update(self):
+        strength, direction = self.simulation.current_grid.get_current_at(self.x, self.y)
+        current_x = strength * math.cos(direction)
+        current_y = strength * math.sin(direction)
+        self.x += current_x * 0.5
+        self.y += current_y * 0.5 - self.float_speed
+
+        self.lifetime -= 1
+
+        if self.y <= 0 or self.y >= HEIGHT or self.lifetime <= 0:
+            return False
+        
+        if random.random() > self.survival_chance:
+            return False
+        
+        return True
+
+    def hatch(self):
+        if self.lifetime <= 0 and random.random() < self.survival_chance:
+            return Fish(self.x, self.y, self.simulation, energy=20, genome=self.genome)
+        return None
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, (255, 200, 200), (int(self.x), int(self.y)), 2)
 
 
 class Fish:
@@ -171,7 +215,8 @@ class Fish:
                 "defense": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
                 "color": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
                 "preferred_depth": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])},
-                "predator": {"alleles": [random.uniform(0, 0.75), random.uniform(0, 0.85)], "dominance": random.choice([0, 1])}
+                "predator": {"alleles": [random.uniform(0, 0.75), random.uniform(0, 0.85)], "dominance": random.choice([0, 1])},
+                "reproduction_strategy": {"alleles": [random.uniform(0, 1), random.uniform(0, 1)], "dominance": random.choice([0, 1])}
             }
         else:
             self.genome = genome
@@ -194,7 +239,7 @@ class Fish:
         self.mate_vision = self.vision * 1.5 
         self.ready_to_mate = False
         self.is_dead = False
-        self.float_speed = 1.5 / (1 + self.size)
+        self.float_speed = 1.5 / (1 + self.size) / 2
         
         # Статевий диморфізм
         if self.is_male:
@@ -234,15 +279,17 @@ class Fish:
 
         self.is_pregnant = False
         self.pregnancy_timer = 0
-        self.pregnancy_duration = random.randint(PREDATOR_PREGNANCY_DUR[0], PREDATOR_PREGNANCY_DUR[1]) \
-            if self.is_predator else random.randint(PREY_PREGNANCY_DUR[0], PREY_PREGNANCY_DUR[1])
+        self.pregnancy_duration = round(random.uniform(*PREDATOR_PREGNANCY_DUR)) \
+            if self.is_predator else round(random.uniform(*PREY_PREGNANCY_DUR))
         self.pregnancy_energy_cost = 0.1 if self.is_predator else 0.05
         self.child_genome = None
         self.after_birth_period = 0
-        self.after_birth_duration = random.randint(PREDATOR_AFTER_BIRTH_DUR[0], PREDATOR_AFTER_BIRTH_DUR[1]) \
-            if self.is_predator else random.randint(PREY_AFTER_BIRTH_DUR[0], PREY_AFTER_BIRTH_DUR[1])
+        self.after_birth_duration = round(random.uniform(*PREDATOR_AFTER_BIRTH_DUR)) \
+            if self.is_predator else round(random.uniform(*PREY_AFTER_BIRTH_DUR))
         self.kids_num = None
-    
+
+        self.is_egglayer = self.reproduction_strategy == "egglayer"
+
     def calculate_traits(self):
         def get_phenotype(trait):
             alleles = self.genome[trait]["alleles"]
@@ -269,9 +316,13 @@ class Fish:
                 and self.genome["predator"]["alleles"][1] > 0.5:
                 self.genome["predator"]["alleles"][1] = 0.49
 
+        repro_strategy_val = get_phenotype("reproduction_strategy")
+        self.reproduction_strategy = "egglayer" if (repro_strategy_val < 0.3 \
+            if self.is_predator else repro_strategy_val < 0.7) else "livebearer"
+
         self.speed = get_phenotype("speed") * (1.5 if self.is_predator else 2.5)
         self.max_size = get_phenotype("size") * (10 if self.is_predator else 6) + (5 if self.is_predator else 3)
-        self.vision = get_phenotype("vision") * (100 if self.is_predator else 60) + (50 if self.is_predator else 30)
+        self.vision = get_phenotype("vision") * (80 if not self.is_predator else 60) + (50 if not self.is_predator else 40)
         self.metabolism = get_phenotype("metabolism")
         self.digestion = get_phenotype("digestion")
         self.reproduction_rate = get_phenotype("reproduction") * (0.25 if self.is_predator else 0.45)
@@ -430,13 +481,12 @@ class Fish:
             other_fish.direction = other_fish.direction * 0.5 + math.atan2(-direction_y, -direction_x) * 0.5
 
     def is_in_algae(self):
-        nearby_algae = self.simulation.get_nearby_algae(self.x, self.y)
+        nearby_segments = self.simulation.get_nearby_segments(self.x, self.y)
         threshold_sq = (self.size + ALGAE_RAD) ** 2
-        for algae in nearby_algae:
-            for seg_x, seg_y in algae.segments:
-                dist_sq = (self.x - seg_x) ** 2 + (self.y - seg_y) ** 2
-                if dist_sq < threshold_sq:
-                    return True
+        for seg_x, seg_y, _ in nearby_segments:
+            dist_sq = (self.x - seg_x) ** 2 + (self.y - seg_y) ** 2
+            if dist_sq < threshold_sq:
+                return True
         return False
 
     def move(self, predators=None, fish_list=None):
@@ -479,7 +529,7 @@ class Fish:
 
         temp_factor = abs(temperature - OPTIMAL_TEMP) / OPTIMAL_TEMP
         metabolism_modifier = 1 + temp_factor * 0.3
-        effective_metabolism = self.metabolism * metabolism_modifier
+        effective_metabolism = self.metabolism * metabolism_modifier * 0.75
 
         oxygen_factor = 1.0
         if oxygen < CRITICAL_OXYGEN:
@@ -702,6 +752,13 @@ class Fish:
                                     self.energy -= 5
                             else:
                                 pass
+
+            for egg in sim.egg_list[:]:
+                dist_sq = (self.x - egg.x) ** 2 + (self.y - egg.y) ** 2
+                if dist_sq < threshold_sq:
+                    energy_gain = egg.energy_value * (0.5 + self.digestion * 0.5)
+                    self.energy = min(self.max_energy, self.energy + energy_gain)
+                    sim.egg_list.remove(egg)
         else:
             for algae in sim.algae_list[:]:
                 for i, (seg_x, seg_y) in enumerate(algae.segments[:]):
@@ -745,16 +802,22 @@ class Fish:
             self.is_male == partner.is_male or 
             self.age < self.min_reproduction_age or partner.age < partner.min_reproduction_age):
             return None
-        
+
         dist_sq = (self.x - partner.x) ** 2 + (self.y - partner.y) ** 2
         threshold_sq = ((self.size + partner.size) * 2) ** 2
         if dist_sq > threshold_sq or self.energy < self.max_energy * 0.2 or partner.energy < partner.max_energy * 0.2:
             return None
-        
+
         if not self.is_male:
-            kids_num = self.kids_num = random.randint(1, 2) if self.is_predator else random.randint(1, 3)
+            if self.is_egglayer:
+                kids_num = self.kids_num = random.randint(10, 15) if self.is_predator else random.randint(15, 25)
+            else:
+                kids_num = self.kids_num = random.randint(1, 2) if self.is_predator else random.randint(1, 3)
         else:
-            kids_num = partner.kids_num = random.randint(1, 2) if partner.is_predator else random.randint(1, 3)
+            if partner.is_egglayer:
+                kids_num = partner.kids_num = random.randint(10, 15) if partner.is_predator else random.randint(15, 25)
+            else:
+                kids_num = partner.kids_num = random.randint(1, 2) if partner.is_predator else random.randint(1, 3)
 
         kid_genomes = []
         for _ in range(kids_num):
@@ -764,68 +827,72 @@ class Fish:
                 partner_alleles = partner.genome[key]["alleles"]
                 self_dom = self.genome[key]["dominance"]
                 partner_dom = partner.genome[key]["dominance"]
-                
                 if self.simulation.get_random() < 0.7:
                     self_allele = self_alleles[self_dom]
                 else:
                     self_allele = random.choice(self_alleles)
-                    
                 if self.simulation.get_random() < 0.7:
                     partner_allele = partner_alleles[partner_dom]
                 else:
                     partner_allele = random.choice(partner_alleles)
-                
                 mutation_range = 0.15
-                
                 if self.simulation.get_random() < MUTATION_RATE and key != "predator":
                     self_allele = max(0, min(1, self_allele + random.uniform(-mutation_range, mutation_range)))
                 if self.simulation.get_random() < MUTATION_RATE and key != "predator":
                     partner_allele = max(0, min(1, partner_allele + random.uniform(-mutation_range, mutation_range)))
-
                 child_genome[key] = {
                     "alleles": [self_allele, partner_allele],
                     "dominance": random.choice([0, 1])
                 }
-
             kid_genomes.append(child_genome)
-        
-        base_energy_cost = self.max_energy * 0.25 
+
+        base_energy_cost = self.max_energy * 0.25 / 2
         energy_cost = base_energy_cost * (1 + self.metabolism * 0.25)
 
         if not self.is_male:
-            self.is_pregnant = True
-            self.child_genome = kid_genomes
+            if self.is_egglayer:
+                for genome in kid_genomes:
+                    incubation_time = random.randint(50, 100) if self.is_predator else random.randint(30, 60)
+                    survival_chance = 0.75 if not self.is_predator else 0.55
+                    egg = Egg(self.x, self.y, self.simulation, genome, incubation_time, survival_chance)
+                    self.simulation.egg_list.append(egg)
+            else:
+                self.is_pregnant = True
+                self.child_genome = kid_genomes
         else:
-            partner.is_pregnant = True
-            partner.child_genome = kid_genomes
+            if partner.is_egglayer:
+                for genome in kid_genomes:
+                    incubation_time = random.randint(50, 100) if partner.is_predator else random.randint(30, 60)
+                    survival_chance = 0.6 if not partner.is_predator else 0.4
+                    egg = Egg(partner.x, partner.y, self.simulation, genome, incubation_time, survival_chance)
+                    self.simulation.egg_list.append(egg)
+            else:
+                partner.is_pregnant = True
+                partner.child_genome = kid_genomes
 
-        self.energy -= energy_cost if not self.is_pregnant else energy_cost * 0.6
-        partner.energy -= energy_cost if not partner.is_pregnant else energy_cost * 0.6
+        self.energy -= energy_cost if not (not self.is_male and self.is_egglayer) else energy_cost * 0.6
+        partner.energy -= energy_cost if not (not partner.is_male and partner.is_egglayer) else energy_cost * 0.6
         self.ready_to_mate = False
         partner.ready_to_mate = False
-        
         return None
-    
+
     def give_birth(self):
-        if self.is_dead or not self.is_pregnant:
+        if self.is_dead or not self.is_pregnant or self.is_egglayer:
             return None
-        
+
         if self.pregnancy_timer < self.pregnancy_duration:
             self.pregnancy_timer += 1
             return None
-        
+
         self.is_pregnant = False
         self.pregnancy_timer = 0
-        
         kids = []
         for i in range(self.kids_num):
-            kids.append(Fish(self.x, self.y, self.simulation, 30, self.child_genome[i]))
-
+            kids.append(Fish(self.x, self.y, self.simulation, 20, self.child_genome[i]))
         self.child_genome = None
         self.kids_num = None
         self.energy -= 5 * (1 + self.metabolism * 0.25)
         self.after_birth_period = self.after_birth_duration
-
         return kids
 
     def draw(self, screen, show_vision, show_targets):
@@ -939,6 +1006,12 @@ class FishDetailsWindow:
                     font=("Arial", 12), bg='#242424', fg='#5E9F61'
             ).pack(pady=5)
 
+            if not self.fish.is_male:
+                tk.Label(left_frame,
+                        text=f"Repro Strategy: {'Egg-laying' if self.fish.is_egglayer else 'Live-bearing'}",
+                        font=("Arial", 12), bg='#242424', fg='#5E9F61'
+                ).pack(pady=5)
+
             if self.fish.is_pregnant:
                 tk.Label(left_frame, 
                         text=f"Pregnant ({self.fish.pregnancy_timer}/{self.fish.pregnancy_duration})",
@@ -988,6 +1061,8 @@ class FishDetailsWindow:
 
             if trait == 'preferred_depth':
                 trait = 'pred_depth'
+            if trait == 'reproduction_strategy':
+                trait = 'reprod_strat'
 
             canvas.create_text(20, y_pos, 
                              text=f"{trait}:", 
@@ -1060,6 +1135,14 @@ class EventHandler:
                 elif event.key == pygame.K_a or event.unicode.lower() == "ф":
                     self.simulation.modes.toggle_mode('show_current', "Current")
 
+                elif event.key == pygame.K_q or event.unicode.lower() == "й":
+                    if self.simulation.algae_back == None:
+                        self.simulation.algae_back = self.simulation.algae_list
+                        self.simulation.algae_list = []
+                    else:
+                        self.simulation.algae_list = self.simulation.algae_back
+                        self.simulation.algae_back = None
+
 
 class UI:
     def __init__(self, simulation: 'Simulation') -> None:
@@ -1075,7 +1158,8 @@ class UI:
         stats = self.font.render(f"Fish: {len([f for f in sim.fish_population if not f.is_dead])} "
                             f"Algae: {len(sim.algae_list)} Plankton: {len(sim.plankton_list)} "
                             f"Crustaceans: {len(sim.crustacean_list)} Dead Parts: {len(sim.dead_algae_parts)} "
-                            f"Pregnants: {len([f for f in sim.fish_population if f.is_pregnant and not f.is_dead])} ", 
+                            f"Pregnants: {len([f for f in sim.fish_population if f.is_pregnant and not f.is_dead])} "
+                            f"Eggs: {len(sim.egg_list)} ",
                             True, (255, 255, 255))
         screen.blit(stats, (10, 10))
 
@@ -1348,39 +1432,31 @@ class CurrentGrid:
     def update(self, simulation):
         season = simulation.seasons[simulation.current_season_index]
         season_modifier = {"Spring": 0.8, "Summer": 1.0, "Autumn": 0.9, "Winter": 0.7}[season]
-        
         self.update_targets(season)
-        
         for i in range(self.layers):
             self.base_strengths[i] += (self.target_base_strengths[i] - self.base_strengths[i]) * 0.01
             angle_diff = (self.target_base_directions[i] - self.base_directions[i] + math.pi) % (2 * math.pi) - math.pi
             self.base_directions[i] = (self.base_directions[i] + angle_diff * 0.05) % (2 * math.pi)
-
         for layer in range(self.layers + 1):
             for col in range(self.cols):
                 self.layer_boundaries[layer][col] += (self.target_layer_boundaries[layer][col] - self.layer_boundaries[layer][col]) * 0.005
-
         for row in range(self.rows):
             y = row * self.grid_size
             for col in range(self.cols):
                 x = col * self.grid_size
                 layer = self.get_layer_at(x, y)
                 current = self.grid[(col, row)]
-                
                 temp = simulation.get_temperature(x, y)
                 temp_factor = (temp - MIN_TEMP) / (MAX_TEMP - MIN_TEMP)
-                
-                target_direction = (self.base_directions[layer] + 
-                                  math.sin(simulation.time * 0.01 + col * 0.1) * math.pi/8 + 
-                                  random.uniform(-math.pi/8, math.pi/8))
+                target_direction = (self.base_directions[layer] +
+                                math.sin(simulation.time * 0.01 + col * 0.1) * math.pi/8 +
+                                random.uniform(-math.pi/8, math.pi/8))
                 target_strength = self.base_strengths[layer] * season_modifier * (1 + temp_factor * 0.3) * (1 + random.uniform(-0.1, 0.1))
-                
-                for algae in simulation.algae_list:
-                    for seg_x, seg_y in algae.segments:
-                        distance = math.hypot(seg_x - x, seg_y - y)
-                        if distance < self.grid_size * 2:
-                            current["strength"] *= (1 - 0.3 * (1 - distance / (self.grid_size * 2)))
-                
+                nearby_segments = simulation.get_nearby_segments(x, y)
+                for seg_x, seg_y, _ in nearby_segments:
+                    distance = math.hypot(seg_x - x, seg_y - y)
+                    if distance < self.grid_size * 2:
+                        current["strength"] *= (1 - 0.3 * (1 - distance / (self.grid_size * 2)))
                 current["strength"] += (target_strength - current["strength"]) * 0.02
                 angle_diff = (target_direction - current["direction"] + math.pi) % (2 * math.pi) - math.pi
                 current["direction"] += angle_diff * 0.05
@@ -1463,6 +1539,7 @@ class Simulation:
         self.modes = ModeManager()
         
         self.dead_algae_parts = []
+        self.egg_list = []
         self.running = True
         self.paused = False
         self.background = self.create_background(WIDTH, HEIGHT)
@@ -1478,7 +1555,7 @@ class Simulation:
         self.current_season_modifier = 1.0
 
         self.grid_size = 10
-        self.oxygen_grid = {}  
+        self.oxygen_grid = {}
         self.temperature_grid = {} 
 
         # Ініціалізація течії
@@ -1507,6 +1584,8 @@ class Simulation:
         self.random_index = 0
         self.frame_counter = 0
 
+        self.algae_back = None
+
     def get_random(self):
         self.random_index = (self.random_index + 1) % len(self.random_buffer)
         if self.random_index == 0:
@@ -1514,23 +1593,24 @@ class Simulation:
         return self.random_buffer[self.random_index]
 
     def add_to_grid(self, algae):
-        grid_x = int(algae.root_x // self.grid_cell_size)
-        grid_y = int(algae.base_y // self.grid_cell_size)
-        key = (grid_x, grid_y)
-        if key not in self.algae_grid:
-            self.algae_grid[key] = []
-        self.algae_grid[key].append(algae)
+        for seg_x, seg_y in algae.segments:
+            grid_x = int(seg_x // self.grid_cell_size)
+            grid_y = int(seg_y // self.grid_cell_size)
+            key = (grid_x, grid_y)
+            if key not in self.algae_grid:
+                self.algae_grid[key] = []
+            self.algae_grid[key].append((seg_x, seg_y, algae))
 
-    def get_nearby_algae(self, x, y):
+    def get_nearby_segments(self, x, y):
         grid_x = int(x // self.grid_cell_size)
         grid_y = int(y // self.grid_cell_size)
-        nearby_algae = []
+        nearby_segments = []
         for dx in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
                 key = (grid_x + dx, grid_y + dy)
                 if key in self.algae_grid:
-                    nearby_algae.extend(self.algae_grid[key])
-        return nearby_algae
+                    nearby_segments.extend(self.algae_grid[key])
+        return nearby_segments
 
     def start_generation(self):
         self.is_generating = True
@@ -1556,7 +1636,7 @@ class Simulation:
         for algae in self.algae_list:
             if algae.is_alive and self.get_random() < 0.2:
                 algae.grow(self)
-                algae.growth_timer = min(algae.growth_timer, random.randint(ALGAE_GROW[0] // 2, ALGAE_GROW[1] // 2))
+                algae.growth_timer = min(algae.growth_timer, round(random.uniform(*ALGAE_GROW)/10))
 
         if len(self.plankton_list) < INITIAL_PLANKTON and self.get_random() < 0.05: 
             self.plankton_list.append(Plankton(random.randint(0, WIDTH), random.randint(0, int(HEIGHT/1.5))))
@@ -1703,14 +1783,14 @@ class Simulation:
                 spawn_rate_modifier = {"Spring": 1.1, "Summer": 1.2, "Autumn": 0.9, "Winter": 0.7}[season]
 
                 if self.get_random() < 0.3 * spawn_rate_modifier:
-                    if self.get_random() < 0.007 and len(self.algae_list) < MAX_ALGAE:
+                    if self.get_random() < 0.0035 and len(self.algae_list) < MAX_ALGAE:
                         new_x = random.randint(0, WIDTH)
                         new_algae = Algae(new_x, HEIGHT)
                         self.algae_list.append(new_algae)
                         self.add_to_grid(new_algae)
-                    elif self.get_random() < 0.3:
+                    elif self.get_random() < 0.15:
                         self.plankton_list.append(Plankton(random.randint(0, WIDTH), random.randint(0, int(HEIGHT/1.5))))
-                    elif self.get_random() < 0.1:
+                    elif self.get_random() < 0.05:
                         self.crustacean_list.append(Crustacean(random.randint(0, WIDTH), random.randint(int(HEIGHT / 3), HEIGHT)))
 
                 new_fish = []
@@ -1739,7 +1819,16 @@ class Simulation:
 
                 self.fish_population.extend(new_fish)
 
-                if self.frame_counter % 3 == 0:
+                for egg in self.egg_list[:]:
+                    if not egg.update():
+                        self.egg_list.remove(egg)
+                    else:
+                        hatched_fish = egg.hatch()
+                        if hatched_fish:
+                            self.fish_population.append(hatched_fish)
+                            self.egg_list.remove(egg)
+
+                if self.frame_counter % 2 == 0:
                     for algae in self.algae_list[:]:
                         algae.update(self.algae_list, self.dead_algae_parts, self)
                         if not algae.segments:
@@ -1750,7 +1839,6 @@ class Simulation:
                         if plankton.lifetime <= 0:
                             self.plankton_list.remove(plankton)
 
-                if self.frame_counter % 2 == 0:
                     for dead_part in self.dead_algae_parts[:]:
                         dead_part.update()
                         if dead_part.lifetime <= 0 or dead_part.y <= 0:
@@ -1772,6 +1860,8 @@ class Simulation:
                     plankton.draw(screen)
                 for dead_part in self.dead_algae_parts:
                     dead_part.draw(screen)
+                for egg in self.egg_list:
+                    egg.draw(screen)
 
                 for fish in self.fish_population:
                     fish.draw(screen, self.modes.show_vision, self.modes.show_targets)
@@ -1779,11 +1869,12 @@ class Simulation:
                 self.ui.draw()
 
             pygame.display.flip()
-            clock.tick(60)
+            clock.tick(25)
 
 
 if __name__ == "__main__":
     sim = Simulation()
     sim.start_generation()
     sim.run()
+    # cProfile.run('sim.run()', 'profile_output')
     pygame.quit()
