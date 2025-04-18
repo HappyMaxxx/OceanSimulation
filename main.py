@@ -5,6 +5,7 @@ import noise
 import tkinter as tk
 from threading import Thread
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import cProfile
 from settings import *
 
@@ -15,9 +16,10 @@ clock = pygame.time.Clock()
 
 
 class Algae:
-    def __init__(self, x, base_y):
+    def __init__(self, x, base_y, simulation):
         self.root_x = x
         self.base_y = base_y
+        self.simulation = simulation
         self.segments = [(x, base_y)]
         self.lowest_y = base_y 
         self.energy_value = 10
@@ -26,8 +28,8 @@ class Algae:
         self.branch_chance = 0.1
         self.is_alive = True
 
-    def grow(self, simulation):  
-        if not self.is_alive or simulation.day_phase == "Night":
+    def grow(self):  
+        if not self.is_alive or self.simulation.day_phase == "Night":
             return
 
         if self.growth_timer > 0:
@@ -38,14 +40,15 @@ class Algae:
         if self.base_y - top_y >= self.max_height:
             return
 
-        season = simulation.seasons[simulation.current_season_index]
+        season = self.simulation.seasons[self.simulation.current_season_index]
         growth_modifier = {"Spring": 1.1, "Summer": 1.2, "Autumn": 0.9, "Winter": 0.7}[season]
 
         top_segment = min(self.segments, key=lambda s: s[1])
         new_x = top_segment[0] + random.uniform(-2, 2)
-        new_y = top_segment[1] - random.uniform(2, 5) * growth_modifier
+        new_y = top_segment[1] - random.uniform(4, 7) * growth_modifier
         
         self.segments.append((new_x, new_y))
+        self.simulation.add_segment_to_grid(new_x, new_y, self)
         self.energy_value += random.randint(1, 3)
         if new_y < self.lowest_y:
             self.lowest_y = new_y 
@@ -54,6 +57,7 @@ class Algae:
             branch_x = top_segment[0] + random.uniform(-5, 5)
             branch_y = top_segment[1] - random.uniform(2, 5) * growth_modifier
             self.segments.append((branch_x, branch_y))
+            self.simulation.add_segment_to_grid(branch_x, branch_y, self)
             self.energy_value += random.randint(1, 2)
             if branch_y < self.lowest_y:
                 self.lowest_y = branch_y  
@@ -63,25 +67,26 @@ class Algae:
     def check_root(self):
         return any(seg[1] >= self.base_y - 4 for seg in self.segments[:5])
 
-    def update(self, algae_list, dead_algae_parts, simulation):
+    def update(self, algae_list, dead_algae_parts):
         if not self.check_root() and self.is_alive:
             self.is_alive = False
             for seg_x, seg_y in self.segments[:]:
                 if seg_y < self.base_y - 4:
-                    if random.random() < 0.3:
-                        dead_algae_parts.append(DeadAlgaePart(seg_x, seg_y))
+                    if random.random() < 0.4:
+                        dead_algae_parts.append(DeadAlgaePart(seg_x, seg_y, self.simulation))
+                self.simulation.remove_segment_from_grid(seg_x, seg_y, self)
             self.segments.clear()
             self.lowest_y = float('inf')
 
         if self.is_alive:
             if random.random() < 0.6:
-                self.grow(simulation)
+                self.grow()
             if len(algae_list) < MAX_ALGAE and random.random() < 0.01:
                 new_x = self.root_x + random.randint(-20, 20)
                 if 0 <= new_x <= WIDTH:
-                    new_algae = Algae(new_x, self.base_y)
+                    new_algae = Algae(new_x, self.base_y, self.simulation)
                     algae_list.append(new_algae)
-                    simulation.add_to_grid(new_algae) 
+                    self.simulation.add_segment_to_grid(new_x, self.base_y, new_algae)
 
     def draw(self, screen):
         if not self.segments:
@@ -98,15 +103,16 @@ class Algae:
 
 
 class DeadAlgaePart:
-    def __init__(self, x, y):
+    def __init__(self, x, y, simulation):
         self.x = x
         self.y = y
+        self.simulation = simulation
         self.energy_value = random.randint(2, 5) 
         self.float_speed = random.uniform(0.2, 0.5)  
         self.lifetime = round(random.uniform(*DEAD_ALGAE_LIFETIME))
 
     def update(self):
-        strength, direction = sim.current_grid.get_current_at(self.x, self.y)
+        strength, direction = self.simulation.current_grid.get_current_at(self.x, self.y)
         current_x = strength * math.cos(direction)
         current_y = strength * math.sin(direction)
         
@@ -418,7 +424,7 @@ class Fish:
             
             return closest
     
-    def find_nearest_prey(self, fish_list, algae_list):
+    def find_nearest_prey(self, fish_list):
         if not fish_list:
             return None
         
@@ -442,7 +448,7 @@ class Fish:
         nearest_prey = min(potential_prey, key=effective_distance, default=None)
         return nearest_prey if effective_distance(nearest_prey) != float('inf') else None
         
-    def find_nearest_mate(self, fish_list, algae_list):
+    def find_nearest_mate(self, fish_list):
         if not fish_list or self.is_pregnant or self.is_dead:
             return None
         
@@ -513,8 +519,8 @@ class Fish:
 
         self.nearest_food = target_food = self.find_nearest_food(sim.algae_list, sim.plankton_list,
                                                    sim.crustacean_list, sim.dead_algae_parts)
-        self.nearest_prey = target_prey = self.find_nearest_prey(fish_list, sim.algae_list) if self.is_predator else None
-        self.nearest_mate = target_mate = self.find_nearest_mate(fish_list, sim.algae_list)
+        self.nearest_prey = target_prey = self.find_nearest_prey(fish_list) if self.is_predator else None
+        self.nearest_mate = target_mate = self.find_nearest_mate(fish_list)
 
         strength, direction = sim.current_grid.get_current_at(self.x, self.y)
         current_x = strength * math.cos(direction)
@@ -793,6 +799,7 @@ class Fish:
                         energy_gain = 3 * (0.5 + self.digestion * 0.5)
                         self.energy = min(self.max_energy, self.energy + energy_gain)
                         algae.segments.pop(i)
+                        sim.remove_segment_from_grid(seg_x, seg_y, algae)
                         algae.energy_value = max(0, algae.energy_value - 3)
                         if not algae.segments:
                             sim.algae_list.remove(algae)
@@ -1034,6 +1041,12 @@ class FishDetailsWindow:
                     font=("Arial", 12), bg='#242424', fg='#5E9F61'
             ).pack(pady=5)
 
+            if self.fish.is_in_algae():
+                tk.Label(left_frame, 
+                        text="In Algae",
+                        font=("Arial", 12), bg='#242424', fg='#5E9F61'
+                ).pack(pady=5)
+
             if not self.fish.is_male:
                 tk.Label(left_frame,
                         text=f"Repro Strategy: {'Egg-laying' if self.fish.is_egglayer else 'Live-bearing'}",
@@ -1164,12 +1177,13 @@ class EventHandler:
                     self.simulation.modes.toggle_mode('show_current', "Current")
 
                 elif event.key == pygame.K_q or event.unicode.lower() == "й":
-                    if self.simulation.algae_back == None:
-                        self.simulation.algae_back = self.simulation.algae_list
-                        self.simulation.algae_list = []
-                    else:
-                        self.simulation.algae_list = self.simulation.algae_back
-                        self.simulation.algae_back = None
+                    self.simulation.plot.show()
+
+                elif event.key == pygame.K_w or event.unicode.lower() == "ц":
+                    self.simulation.show_stats = not self.simulation.show_stats
+
+                elif event.key == pygame.K_e or event.unicode.lower() == "у":
+                    self.simulation.show_fps = not self.simulation.show_fps
 
 
 class UI:
@@ -1183,37 +1197,39 @@ class UI:
 
         sim = self.simulation
 
-        stats = self.font.render(f"Fish: {len([f for f in sim.fish_population if not f.is_dead])} "
-                            f"Algae: {len(sim.algae_list)} Plankton: {len(sim.plankton_list)} "
-                            f"Crustaceans: {len(sim.crustacean_list)} Dead Parts: {len(sim.dead_algae_parts)} "
-                            f"Pregnants: {len([f for f in sim.fish_population if f.is_pregnant and not f.is_dead])} "
-                            f"Eggs: {len(sim.egg_list)} ",
-                            True, (255, 255, 255))
-        screen.blit(stats, (10, 10))
-
-        prey_gender_stats = self.font.render(f"Prey ({len(prey)}) - Male: {len([f for f in prey if f.is_male])} "
-                                        f"Female: {len([f for f in prey if not f.is_male])}",
-                                        True, (255, 255, 255))
-        screen.blit(prey_gender_stats, (10, 30))
-
-        predator_gender_stats = self.font.render(f"Predators ({len(predators)}) - Male: {len([f for f in predators if f.is_male])} "
-                                            f"Female: {len([f for f in predators if not f.is_male])}",
-                                            True, (255, 255, 255))
-        screen.blit(predator_gender_stats, (10, 50))
-
-        time_info = self.font.render(f"Phase: {sim.day_phase} {sim.time // sim.day_length:.0f} ({sim.time}) "
-                                f"Season: {sim.seasons[sim.current_season_index]}", 
+        if self.simulation.show_stats:
+            stats = self.font.render(f"Fish: {len([f for f in sim.fish_population if not f.is_dead])} "
+                                f"Algae: {len(sim.algae_list)} Plankton: {len(sim.plankton_list)} "
+                                f"Crustaceans: {len(sim.crustacean_list)} Dead Parts: {len(sim.dead_algae_parts)} "
+                                f"Pregnants: {len([f for f in sim.fish_population if f.is_pregnant and not f.is_dead])} "
+                                f"Eggs: {len(sim.egg_list)} ",
                                 True, (255, 255, 255))
-        screen.blit(time_info, (10, 70))
+            screen.blit(stats, (10, 10))
+
+            prey_gender_stats = self.font.render(f"Prey ({len(prey)}) - Male: {len([f for f in prey if f.is_male])} "
+                                            f"Female: {len([f for f in prey if not f.is_male])}",
+                                            True, (255, 255, 255))
+            screen.blit(prey_gender_stats, (10, 30))
+
+            predator_gender_stats = self.font.render(f"Predators ({len(predators)}) - Male: {len([f for f in predators if f.is_male])} "
+                                                f"Female: {len([f for f in predators if not f.is_male])}",
+                                                True, (255, 255, 255))
+            screen.blit(predator_gender_stats, (10, 50))
+
+            time_info = self.font.render(f"Phase: {sim.day_phase} {sim.time // sim.day_length:.0f} ({sim.time}) "
+                                    f"Season: {sim.seasons[sim.current_season_index]}", 
+                                    True, (255, 255, 255))
+            screen.blit(time_info, (10, 70))
         
         if self.simulation.paused:
             pause_text = self.font.render("PAUSED", True, (255, 255, 255))
             screen.blit(pause_text, (WIDTH//2 - pause_text.get_width()//2, HEIGHT//2 - pause_text.get_height()//2))
 
-        # pygame.draw.line(screen, (255, 255, 255), (0, LINE_LEVEL), (WIDTH, LINE_LEVEL), 1)
+        if self.simulation.show_fps:
+            fps = self.font.render(f"FPS: {int(clock.get_fps())}", True, (255, 255, 255))
+            screen.blit(fps, (10, HEIGHT - 15))
 
-        fps = self.font.render(f"FPS: {int(clock.get_fps())}", True, (255, 255, 255))
-        screen.blit(fps, (10, HEIGHT - 15))
+        # pygame.draw.line(screen, (255, 255, 255), (0, LINE_LEVEL), (WIDTH, LINE_LEVEL), 1)
     
     def draw_active_modes(self):
         x_pos = WIDTH - 100 
@@ -1536,35 +1552,157 @@ class CurrentGrid:
 class Plot:
     def __init__(self, simulation: 'Simulation') -> None:
         self.simulation = simulation
-        self.fish_info = []
+        self.fish_info = [] 
+        self.energy_info = [] 
+        self.size_info = []  
+        self.algaes_info = []
         self.global_time = 0
+        self.window = None
+        self.canvas = None
+        self.figure = None
+        self.current_plot_type = "population"
 
     def update(self):
         fishes_population = len([f for f in self.simulation.fish_population if not f.is_dead])
         predators = len([f for f in self.simulation.fish_population if f.is_predator and not f.is_dead])
         prey = len([f for f in self.simulation.fish_population if not f.is_predator and not f.is_dead])
 
+        predator_fish = [f for f in self.simulation.fish_population if f.is_predator and not f.is_dead]
+        prey_fish = [f for f in self.simulation.fish_population if not f.is_predator and not f.is_dead]
+        avg_energy_predators = sum(f.energy for f in predator_fish) / len(predator_fish) if predator_fish else 0
+        avg_energy_prey = sum(f.energy for f in prey_fish) / len(prey_fish) if prey_fish else 0
+
+        avg_size_predators = sum(f.size for f in predator_fish) / len(predator_fish) if predator_fish else 0
+        avg_size_prey = sum(f.size for f in prey_fish) / len(prey_fish) if prey_fish else 0
+        algaes_parts = sum(len(a.segments) for a in self.simulation.algae_list)
+
         self.fish_info.append((self.global_time, fishes_population, predators, prey))
+        self.energy_info.append((self.global_time, avg_energy_predators, avg_energy_prey))
+        self.size_info.append((self.global_time, avg_size_predators, avg_size_prey))
+        self.algaes_info.append((self.global_time, algaes_parts))
         self.global_time += 1
 
+        if self.window is not None:
+            self.update_plot()
+
+    def create_window(self):
+        def open_window():
+            self.simulation.paused = True
+            self.window = tk.Tk()
+            self.window.title("Simulation Graphs")
+            self.window.geometry("800x600")
+            self.window.configure(bg='#242424')
+
+            left_frame = tk.Frame(self.window, bg='#242424')
+            left_frame.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+            right_frame = tk.Frame(self.window, bg='#242424', width=150)
+            right_frame.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.Y)
+
+            tk.Button(right_frame, text="Population", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', highlightbackground='#424242',
+                      command=lambda: self.switch_plot("population")).pack(pady=5, fill=tk.X)
+            tk.Button(right_frame, text="Energy", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', highlightbackground='#424242',
+                      command=lambda: self.switch_plot("energy")).pack(pady=5, fill=tk.X)
+            tk.Button(right_frame, text="Size", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', highlightbackground='#424242',
+                      command=lambda: self.switch_plot("size")).pack(pady=5, fill=tk.X)
+            tk.Button(right_frame, text="Algaes", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', highlightbackground='#424242',
+                      command=lambda: self.switch_plot("algaes")).pack(pady=5, fill=tk.X)
+                    
+            self.figure, self.ax = plt.subplots(figsize=(6, 4))
+
+            bottom_frame = tk.Frame(right_frame, bg='#242424')
+            bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
+
+            tk.Button(bottom_frame, text="Close", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', highlightbackground='#424242',
+                      command=self.close_window).pack(fill=tk.X)
+
+            self.canvas = FigureCanvasTkAgg(self.figure, master=left_frame)
+            self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+            self.update_plot()
+
+            self.window.protocol("WM_DELETE_WINDOW", self.close_window)
+            self.window.mainloop()
+
+        if self.window is None or not self.window.winfo_exists():
+            Thread(target=open_window).start()
+
+    def switch_plot(self, plot_type):
+        self.current_plot_type = plot_type
+        self.update_plot()
+
+    def update_plot(self):
+        if self.figure is None or self.ax is None:
+            return
+
+        self.ax.clear()
+
+        if self.current_plot_type == "population":
+            self.ax.set_title("Fish Population Over Time")
+            self.ax.set_xlabel("Time")
+            self.ax.set_ylabel("Population")
+            max_y = max([info[1] for info in self.fish_info] + [1]) * 1.2
+            self.ax.set_ylim(0, max_y)
+            self.ax.plot([info[0] for info in self.fish_info], [info[1] for info in self.fish_info], label="Total Fish")
+            self.ax.plot([info[0] for info in self.fish_info], [info[2] for info in self.fish_info], label="Predators")
+            self.ax.plot([info[0] for info in self.fish_info], [info[3] for info in self.fish_info], label="Prey")
+            self.ax.legend()
+
+        elif self.current_plot_type == "energy":
+            self.ax.set_title("Average Energy Over Time")
+            self.ax.set_xlabel("Time")
+            self.ax.set_ylabel("Average Energy")
+            max_y = max([max(info[1], info[2]) for info in self.energy_info] + [1]) * 1.2
+            self.ax.set_ylim(0, max_y)
+            self.ax.plot([info[0] for info in self.energy_info], [info[1] for info in self.energy_info], label="Predators")
+            self.ax.plot([info[0] for info in self.energy_info], [info[2] for info in self.energy_info], label="Prey")
+            self.ax.legend()
+
+        elif self.current_plot_type == "size":
+            self.ax.set_title("Average Size Over Time")
+            self.ax.set_xlabel("Time")
+            self.ax.set_ylabel("Average Size")
+            max_y = max([max(info[1], info[2]) for info in self.size_info] + [1]) * 1.2
+            self.ax.set_ylim(0, max_y)
+            self.ax.plot([info[0] for info in self.size_info], [info[1] for info in self.size_info], label="Predators")
+            self.ax.plot([info[0] for info in self.size_info], [info[2] for info in self.size_info], label="Prey")
+            self.ax.legend()
+
+        elif self.current_plot_type == "algaes":
+            self.ax.set_title("Algae Parts Over Time")
+            self.ax.set_xlabel("Time")
+            self.ax.set_ylabel("Algae Parts")
+            max_y = max([info[1] for info in self.algaes_info] + [1]) * 1.2
+            self.ax.set_ylim(0, max_y)
+            self.ax.plot([info[0] for info in self.algaes_info], [info[1] for info in self.algaes_info], label="Algae Parts")
+            self.ax.legend()
+
+        self.canvas.draw()
+
+    def close_window(self):
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
+            self.figure = None
+            self.ax = None
+            self.canvas = None
+            self.simulation.paused = False
+
     def show(self):
-        self.simulation.paused = True
-        fig, ax = plt.subplots()
-        ax.set_title("Fish Population Over Time")
-        ax.set_xlabel("Time")
-        ax.set_ylabel("Population")
-        ax.set_ylim(0, max([info[1] for info in self.fish_info] + [1]) * 1.2)
-        ax.plot([info[0] for info in self.fish_info], [info[1] for info in self.fish_info], label="Total Fish")
-        ax.plot([info[0] for info in self.fish_info], [info[2] for info in self.fish_info], label="Predators")
-        ax.plot([info[0] for info in self.fish_info], [info[3] for info in self.fish_info], label="Prey")
-        ax.legend()
-        plt.show()
+        self.create_window()
 
 class Simulation:
     def __init__(self):
         self.event_handler = EventHandler(self)
         self.ui = UI(self)
         self.modes = ModeManager()
+        self.show_stats = True
+        self.show_fps = False
         
         self.dead_algae_parts = []
         self.egg_list = []
@@ -1619,15 +1757,24 @@ class Simulation:
         if self.random_index == 0:
             self.random_buffer = [random.random() for _ in range(1000)]
         return self.random_buffer[self.random_index]
+    
+    def add_segment_to_grid(self, seg_x, seg_y, algae):
+        grid_x = int(seg_x // self.grid_cell_size)
+        grid_y = int(seg_y // self.grid_cell_size)
+        key = (grid_x, grid_y)
+        if key not in self.algae_grid:
+            self.algae_grid[key] = []
+        self.algae_grid[key].append((seg_x, seg_y, algae))
 
-    def add_to_grid(self, algae):
-        for seg_x, seg_y in algae.segments:
-            grid_x = int(seg_x // self.grid_cell_size)
-            grid_y = int(seg_y // self.grid_cell_size)
-            key = (grid_x, grid_y)
-            if key not in self.algae_grid:
-                self.algae_grid[key] = []
-            self.algae_grid[key].append((seg_x, seg_y, algae))
+    def remove_segment_from_grid(self, seg_x, seg_y, algae):
+        grid_x = int(seg_x // self.grid_cell_size)
+        grid_y = int(seg_y // self.grid_cell_size)
+        key = (grid_x, grid_y)
+        if key in self.algae_grid:
+            self.algae_grid[key] = [seg for seg in self.algae_grid[key]
+                                    if not (seg[0] == seg_x and seg[1] == seg_y and seg[2] == algae)]
+            if not self.algae_grid[key]:
+                del self.algae_grid[key]
 
     def get_nearby_segments(self, x, y):
         grid_x = int(x // self.grid_cell_size)
@@ -1645,9 +1792,9 @@ class Simulation:
         self.generation_step = 0
         self.paused = True
 
-        self.algae_list = [Algae(random.randint(0, WIDTH), HEIGHT) for _ in range(INITIAL_ALGAE)]
+        self.algae_list = [Algae(random.randint(0, WIDTH), HEIGHT, self) for _ in range(INITIAL_ALGAE)]
         for algae in self.algae_list:
-            self.add_to_grid(algae)
+            self.add_segment_to_grid(algae.segments[0][0], algae.segments[0][1], algae)
         self.plankton_list = [] 
         self.crustacean_list = []  
         self.fish_population = []  
@@ -1660,10 +1807,16 @@ class Simulation:
             self.update_temperature_grid()
             return
 
+        # Event handling to avoid the “Program does not respond” message
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+                self.is_generating = False
+
         self.random_buffer.append(random.random())
         for algae in self.algae_list:
             if algae.is_alive and self.get_random() < 0.2:
-                algae.grow(self)
+                algae.grow()
                 algae.growth_timer = min(algae.growth_timer, round(random.uniform(*ALGAE_GROW)/10))
 
         if len(self.plankton_list) < INITIAL_PLANKTON and self.get_random() < 0.05: 
@@ -1806,6 +1959,8 @@ class Simulation:
 
                 if len([f for f in self.fish_population if not f.is_dead]) < 1:
                     self.plot.show()
+                    self.running = False
+                    continue
 
                 season = self.seasons[self.current_season_index]
                 spawn_rate_modifier = {"Spring": 1.1, "Summer": 1.2, "Autumn": 0.9, "Winter": 0.7}[season]
@@ -1813,9 +1968,9 @@ class Simulation:
                 if self.get_random() < 0.3 * spawn_rate_modifier:
                     if self.get_random() < 0.0035 and len(self.algae_list) < MAX_ALGAE:
                         new_x = random.randint(0, WIDTH)
-                        new_algae = Algae(new_x, HEIGHT)
+                        new_algae = Algae(new_x, HEIGHT, self)
                         self.algae_list.append(new_algae)
-                        self.add_to_grid(new_algae)
+                        self.add_segment_to_grid(new_x, HEIGHT, new_algae)
                     elif self.get_random() < 0.15:
                         self.plankton_list.append(Plankton(random.randint(0, WIDTH), random.randint(0, int(HEIGHT/1.5))))
                     elif self.get_random() < 0.05:
@@ -1849,7 +2004,7 @@ class Simulation:
 
                 if self.frame_counter % 2 == 0:
                     for algae in self.algae_list[:]:
-                        algae.update(self.algae_list, self.dead_algae_parts, self)
+                        algae.update(self.algae_list, self.dead_algae_parts)
                         if not algae.segments:
                             self.algae_list.remove(algae)
 
@@ -1900,9 +2055,14 @@ class Simulation:
             clock.tick(25)
 
 
+def main():
+    sim.start_generation()
+    if PROFILING:
+        cProfile.run('sim.run()', 'profile_output')
+    else:
+        sim.run()
+    pygame.quit()
+
 if __name__ == "__main__":
     sim = Simulation()
-    sim.start_generation()
-    sim.run()
-    # cProfile.run('sim.run()', 'profile_output')
-    pygame.quit()
+    main()
