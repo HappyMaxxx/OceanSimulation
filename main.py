@@ -173,9 +173,9 @@ class Egg:
         self.x += current_x * 0.5
         self.y += current_y * 0.5 - self.float_speed
 
-        self.lifetime -= 1
+        self.lifetime -= 3
 
-        if self.y <= 0 or self.y >= HEIGHT or self.lifetime <= 0:
+        if self.y <= 0 or self.y >= HEIGHT:
             return False
         
         if random.random() > self.survival_chance:
@@ -189,7 +189,7 @@ class Egg:
         return None
 
     def draw(self, screen):
-        pygame.draw.circle(screen, (255, 200, 200), (int(self.x), int(self.y)), 2)
+        pygame.draw.circle(screen, (244, 54, 5), (int(self.x), int(self.y)), 2)
 
 
 class Fish:
@@ -384,7 +384,15 @@ class Fish:
             closest_crust = min(crustacean_list, key=lambda c: (c.x - self.x) ** 2 + (c.y - self.y) ** 2)
             dist_sq = (closest_crust.x - self.x) ** 2 + (closest_crust.y - self.y) ** 2
             vision_sq = self.vision_sq_a if self.is_in_algae else self.vision_sq_o
+
+            if self.simulation.egg_list:
+                closest_egg = min(self.simulation.egg_list, key=lambda c: (c.x - self.x) ** 2 + (c.y - self.y) ** 2)
+                dist_sq_egg = (closest_egg.x - self.x) ** 2 + (closest_egg.y - self.y) ** 2
+                if dist_sq_egg < dist_sq:
+                    return closest_egg if dist_sq_egg < vision_sq else None
+
             return closest_crust if dist_sq < vision_sq else None
+
         else:
             closest = None
             min_dist_sq = self.vision_sq_a if self.is_in_algae else self.vision_sq_o
@@ -577,7 +585,24 @@ class Fish:
 
         vision_sq = self.vision_sq_a if self.is_in_algae else self.vision_sq_o
         if nearest_predator and (nearest_predator.x - self.x) ** 2 + (nearest_predator.y - self.y) ** 2 < vision_sq:
-            desired_angle = math.atan2(self.y - nearest_predator.y, self.x - nearest_predator.x)
+            base_angle = math.atan2(self.y - nearest_predator.y, self.x - nearest_predator.x)
+
+            if self.y > HEIGHT - LINE_LEVEL:
+                possible_angles = [base_angle + math.pi / 3, base_angle - math.pi / 3, base_angle]
+                best_angle = base_angle
+                max_dist = -float('inf')
+                
+                for angle in possible_angles:
+                    new_x = self.x + math.cos(angle) * effective_speed
+                    new_y = self.y + math.sin(angle) * effective_speed
+                    dist_sq = (nearest_predator.x - new_x) ** 2 + (nearest_predator.y - new_y) ** 2
+                    if dist_sq > max_dist:
+                        max_dist = dist_sq
+                        best_angle = angle
+                desired_angle = best_angle
+            else:
+                desired_angle = base_angle
+
             angle_diff = desired_angle - self.direction
             angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
             if abs(angle_diff) > self.turn_speed:
@@ -585,6 +610,7 @@ class Fish:
             else:
                 self.direction = desired_angle
             self.direction = self.direction % (2 * math.pi)
+
             self.x += math.cos(self.direction) * effective_speed * 1.2
             self.y += math.sin(self.direction) * effective_speed * 1.2
 
@@ -852,26 +878,28 @@ class Fish:
         if not self.is_male:
             if self.is_egglayer:
                 for genome in kid_genomes:
-                    incubation_time = random.randint(50, 100) if self.is_predator else random.randint(30, 60)
-                    survival_chance = 0.75 if not self.is_predator else 0.55
-                    egg = Egg(self.x, self.y, self.simulation, genome, incubation_time, survival_chance)
+                    incubation_time = random.randint(100, 150) if self.is_predator else random.randint(80, 110)
+                    survival_chance = 0.88 if not self.is_predator else 0.73
+                    egg = Egg(self.x + random.uniform(-2, 2), self.y + random.uniform(-2, 2), self.simulation, genome, incubation_time, survival_chance)
                     self.simulation.egg_list.append(egg)
+                self.after_birth_period = self.after_birth_duration / 4.5
             else:
                 self.is_pregnant = True
                 self.child_genome = kid_genomes
         else:
             if partner.is_egglayer:
                 for genome in kid_genomes:
-                    incubation_time = random.randint(50, 100) if partner.is_predator else random.randint(30, 60)
-                    survival_chance = 0.6 if not partner.is_predator else 0.4
-                    egg = Egg(partner.x, partner.y, self.simulation, genome, incubation_time, survival_chance)
+                    incubation_time = random.randint(100, 150) if partner.is_predator else random.randint(80, 110)
+                    survival_chance = 0.88 if not partner.is_predator else 0.73
+                    egg = Egg(partner.x + random.uniform(-2, 2), partner.y + random.uniform(-2, 2), self.simulation, genome, incubation_time, survival_chance)
                     self.simulation.egg_list.append(egg)
+                partner.after_birth_period = self.after_birth_duration / 4.5
             else:
                 partner.is_pregnant = True
                 partner.child_genome = kid_genomes
 
-        self.energy -= energy_cost if not (not self.is_male and self.is_egglayer) else energy_cost * 0.6
-        partner.energy -= energy_cost if not (not partner.is_male and partner.is_egglayer) else energy_cost * 0.6
+        self.energy -= energy_cost if not (not self.is_male and self.is_egglayer) else energy_cost * 0.55
+        partner.energy -= energy_cost if not (not partner.is_male and partner.is_egglayer) else energy_cost * 0.55
         self.ready_to_mate = False
         partner.ready_to_mate = False
         return None
@@ -960,7 +988,7 @@ class FishDetailsWindow:
             self.window = tk.Tk()
 
             self.window.title("Fish Details")
-            self.window.geometry("660x570")
+            self.window.geometry("670x570")
             self.window.configure(bg='#242424')
 
             left_frame = tk.Frame(self.window, bg='#242424')
@@ -1819,15 +1847,6 @@ class Simulation:
 
                 self.fish_population.extend(new_fish)
 
-                for egg in self.egg_list[:]:
-                    if not egg.update():
-                        self.egg_list.remove(egg)
-                    else:
-                        hatched_fish = egg.hatch()
-                        if hatched_fish:
-                            self.fish_population.append(hatched_fish)
-                            self.egg_list.remove(egg)
-
                 if self.frame_counter % 2 == 0:
                     for algae in self.algae_list[:]:
                         algae.update(self.algae_list, self.dead_algae_parts, self)
@@ -1848,6 +1867,15 @@ class Simulation:
                         crust.update()
                         if crust.lifetime <= 0:
                             self.crustacean_list.remove(crust)
+
+                    for egg in self.egg_list[:]:
+                        if not egg.update():
+                            self.egg_list.remove(egg)
+                        else:
+                            hatched_fish = egg.hatch()
+                            if hatched_fish:
+                                self.fish_population.append(hatched_fish)
+                                self.egg_list.remove(egg)
 
                 self.frame_counter += 1
 
