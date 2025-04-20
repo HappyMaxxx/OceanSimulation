@@ -116,8 +116,8 @@ class DeadAlgaePart:
         current_x = strength * math.cos(direction)
         current_y = strength * math.sin(direction)
         
-        self.x += current_x * 1.15 
-        self.y += current_y * 1.15 - (self.float_speed * 1.2 - 0.02)
+        self.x += current_x * CURRENT_MOVEMENT_FACTOR
+        self.y += current_y * CURRENT_MOVEMENT_FACTOR - (self.float_speed * 1.2 - 0.02)
         self.y -= self.float_speed 
         self.lifetime -= 2
 
@@ -280,8 +280,8 @@ class Fish:
         repro_variation = random.uniform(0.7, 1.3)
         self.min_reproduction_age = base_reproduction_age * repro_variation * (1.5 if self.is_predator else 1.0)
 
-        self.vision_sq_o = self.vision * self.vision
-        self.vision_sq_a = self.vision * self.vision * 0.7 * 0.7
+        self.vision_sq_o = self.vision ** 2
+        self.vision_sq_a = self.vision ** 2 * VISION_REDUCTION_IN_ALGAE ** 2
 
         self.is_pregnant = False
         self.pregnancy_timer = 0
@@ -428,7 +428,7 @@ class Fish:
         if not fish_list:
             return None
         
-        effective_vision = self.vision * (0.7 if self.is_in_algae() else 1)
+        effective_vision = self.vision * (VISION_REDUCTION_IN_ALGAE if self.is_in_algae() else 1)
         potential_prey = [f for f in fish_list if f != self and 
                         (f.is_dead or
                         (not f.is_predator) or 
@@ -440,7 +440,8 @@ class Fish:
         def effective_distance(prey):
             prey_in_algae = prey.is_in_algae()
             self_in_algae = self.is_in_algae()
-            vision = effective_vision * 0.4 if (prey_in_algae and not self_in_algae) else effective_vision
+            vision = effective_vision * 0.4 \
+                if (prey_in_algae and not self_in_algae) else effective_vision
             vision_sq_adj = vision * vision
             dist_sq = (prey.x - self.x) ** 2 + (prey.y - self.y) ** 2
             return dist_sq if dist_sq < vision_sq_adj else float('inf')
@@ -452,8 +453,11 @@ class Fish:
         if not fish_list or self.is_pregnant or self.is_dead:
             return None
         
-        effective_mate_vision = self.mate_vision * (0.7 if self.is_in_algae() else 1)
-        potential_mates = [f for f in fish_list if f != self and f.ready_to_mate and f.is_predator == self.is_predator and f.is_male != self.is_male]
+        effective_mate_vision = self.mate_vision * (VISION_REDUCTION_IN_ALGAE 
+                                                    if self.is_in_algae() else 1)
+        
+        potential_mates = [f for f in fish_list if f != self and f.ready_to_mate
+                           and f.is_predator == self.is_predator and f.is_male != self.is_male]
         
         if not potential_mates:
             return None
@@ -511,8 +515,8 @@ class Fish:
             current_x = strength * math.cos(direction)
             current_y = strength * math.sin(direction)
             
-            self.x += current_x * 1.15 
-            self.y += current_y * 1.15 - (self.float_speed * 1.2 - self.size * 0.02)
+            self.x += current_x * CURRENT_MOVEMENT_FACTOR
+            self.y += current_y * CURRENT_MOVEMENT_FACTOR - (self.float_speed * 1.2 - self.size * 0.02)
             if self.y <= 0: 
                 return
             return
@@ -563,7 +567,7 @@ class Fish:
         current_strength = (HEIGHT - self.y) / HEIGHT * 0.5  
         self.x += current_strength
 
-        effective_vision = self.vision * (0.7 if in_algae else 1)
+        effective_vision = self.vision * (VISION_REDUCTION_IN_ALGAE if in_algae else 1)
 
         if sim.seasons[sim.current_season_index] == "Spring":
             self.reproduction_rate = 0.55 if not self.is_predator else 0.35
@@ -581,7 +585,7 @@ class Fish:
 
         effective_speed = effective_speed * (0.65 if in_algae else 1) 
         if self.is_pregnant:
-            effective_speed *= 0.8
+            effective_speed *= 0.85
 
         # Пріоритети дій:
         # 1. Втеча від хижака
@@ -705,7 +709,7 @@ class Fish:
 
                     self.direction += random.uniform(-self.turn_speed * 0.2, self.turn_speed * 0.2)
 
-                idle_speed = effective_speed * 0.2 
+                idle_speed = effective_speed * IDLE_MOVEMENT_FACTOR 
 
             self.x += math.cos(self.direction) * idle_speed
             self.y += math.sin(self.direction) * idle_speed
@@ -1150,12 +1154,20 @@ class EventHandler:
                 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_x, mouse_y = pygame.mouse.get_pos()
-                for fish in self.simulation.fish_population:
-                    dist_sq = (fish.x - mouse_x) ** 2 + (fish.y - mouse_y) ** 2
-                    threshold_sq = (fish.size + 5) ** 2
-                    if dist_sq < threshold_sq:
-                        FishDetailsWindow(self.simulation, fish)
-                        break
+
+                if 'Creative' in self.simulation.modes.active_modes:
+                    if 'Plankton' in self.simulation.modes.active_modes:
+                        self.simulation.plankton_list.append(Plankton(mouse_x, mouse_y))
+                    elif 'Crustacean' in self.simulation.modes.active_modes:
+                        self.simulation.crustacean_list.append(Crustacean(mouse_x, mouse_y))
+
+                else:
+                    for fish in self.simulation.fish_population:
+                        dist_sq = (fish.x - mouse_x) ** 2 + (fish.y - mouse_y) ** 2
+                        threshold_sq = (fish.size + 5) ** 2
+                        if dist_sq < threshold_sq:
+                            FishDetailsWindow(self.simulation, fish)
+                            break
                 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
@@ -1166,15 +1178,6 @@ class EventHandler:
 
                 elif event.key == pygame.K_c or event.unicode.lower() == "с":
                     self.simulation.modes.toggle_mode('show_targets', "Targets")
-                
-                elif event.key == pygame.K_x or event.unicode.lower() == "ч":
-                    self.simulation.modes.toggle_mode('show_temp_map', "Temp Map")
-
-                elif event.key == pygame.K_z or event.unicode.lower() == "я":
-                    self.simulation.modes.toggle_mode('show_oxygen_map', "Oxy Map")
-                
-                elif event.key == pygame.K_a or event.unicode.lower() == "ф":
-                    self.simulation.modes.toggle_mode('show_current', "Current")
 
                 elif event.key == pygame.K_q or event.unicode.lower() == "й":
                     self.simulation.plot.show()
@@ -1184,6 +1187,26 @@ class EventHandler:
 
                 elif event.key == pygame.K_e or event.unicode.lower() == "у":
                     self.simulation.show_fps = not self.simulation.show_fps
+                
+                elif event.key == pygame.K_a or event.unicode.lower() == "ф":
+                    self.simulation.modes.toggle_mode('show_current', "Current")
+
+                elif event.key == pygame.K_s or event.unicode.lower() == "і":
+                    self.simulation.modes.toggle_mode('creative', "Creative")
+                
+                if "Creative" in self.simulation.modes.active_modes:
+                    if event.key == pygame.K_z or event.unicode.lower() == "я":
+                        self.simulation.modes.toggle_mode('cre_plankton', "Plankton")
+
+                    elif event.key == pygame.K_x or event.unicode.lower() == "ч":
+                        self.simulation.modes.toggle_mode('cre_crustacean', "Crustacean")
+
+                else:
+                    if event.key == pygame.K_z or event.unicode.lower() == "я":
+                        self.simulation.modes.toggle_mode('show_oxygen_map', "Oxy Map")
+                    
+                    elif event.key == pygame.K_x or event.unicode.lower() == "ч":
+                        self.simulation.modes.toggle_mode('show_temp_map', "Temp Map")
 
 
 class UI:
@@ -1246,6 +1269,12 @@ class UI:
                 mode_text = self.font.render("Oxy Map", True, (255, 255, 255))
             elif mode == 'Current':
                 mode_text = self.font.render("Current", True, (255, 255, 255))
+            elif mode == 'Creative':
+                mode_text = self.font.render("Creative", True, (255, 255, 255))
+            elif mode == 'Plankton':
+                mode_text = self.font.render("Plankton", True, (255, 255, 255))
+            elif mode == 'Crustacean':
+                mode_text = self.font.render("Crustacean", True, (255, 255, 255))
             else:
                 continue
 
@@ -1349,9 +1378,15 @@ class ModeManager:
     def __init__(self):
         self.show_vision = False
         self.show_targets = False
+        self.show_current = False
+
         self.show_temp_map = False
         self.show_oxygen_map = False
-        self.show_current = False
+
+        self.creative = False
+        self.cre_plankton = False
+        self.cre_crustacean = False
+
         self.active_modes = []
     
     def toggle_mode(self, mode, text):
@@ -1365,11 +1400,35 @@ class ModeManager:
                 self.active_modes.remove('Temp Map')
                 self.show_temp_map = False
 
+            elif text == 'Creative' and 'Oxy Map' in self.active_modes:
+                self.active_modes.remove('Oxy Map')
+                self.show_oxygen_map = False
+            
+            elif text == 'Creative' and 'Temp Map' in self.active_modes:
+                self.active_modes.remove('Temp Map')
+                self.show_temp_map = False
+            
+            elif text == 'Plankton' and 'Crustacean' in self.active_modes:
+                self.active_modes.remove('Crustacean')
+                self.cre_crustacean = False
+            
+            elif text == 'Crustacean' and 'Plankton' in self.active_modes:
+                self.active_modes.remove('Plankton')
+                self.cre_plankton = False
+
             if text not in self.active_modes:
                 self.active_modes.append(text)
         else:
             if text in self.active_modes:
                 self.active_modes.remove(text)
+            
+            if 'Creative' not in self.active_modes and 'Plankton' in self.active_modes:
+                self.active_modes.remove('Plankton')
+                self.cre_plankton = False
+            
+            if 'Creative' not in self.active_modes and 'Crustacean' in self.active_modes:
+                self.active_modes.remove('Crustacean')
+                self.cre_crustacean = False
 
 
 class CurrentGrid:
@@ -1555,7 +1614,8 @@ class Plot:
         self.fish_info = [] 
         self.energy_info = [] 
         self.size_info = []  
-        self.algaes_info = []
+        self.food_info = []
+        self.algae_info = []
         self.global_time = 0
         self.window = None
         self.canvas = None
@@ -1575,11 +1635,15 @@ class Plot:
         avg_size_predators = sum(f.size for f in predator_fish) / len(predator_fish) if predator_fish else 0
         avg_size_prey = sum(f.size for f in prey_fish) / len(prey_fish) if prey_fish else 0
         algaes_parts = sum(len(a.segments) for a in self.simulation.algae_list)
+        planktons = len(self.simulation.plankton_list)
+        crustaceans = len(self.simulation.crustacean_list)
+        dead_parts = len(self.simulation.dead_algae_parts)
 
         self.fish_info.append((self.global_time, fishes_population, predators, prey))
         self.energy_info.append((self.global_time, avg_energy_predators, avg_energy_prey))
         self.size_info.append((self.global_time, avg_size_predators, avg_size_prey))
-        self.algaes_info.append((self.global_time, algaes_parts))
+        self.food_info.append((self.global_time, planktons, crustaceans, dead_parts))
+        self.algae_info.append((self.global_time, algaes_parts))
         self.global_time += 1
 
         if self.window is not None:
@@ -1608,9 +1672,12 @@ class Plot:
             tk.Button(right_frame, text="Size", font=("Arial", 12), bg='#333333',
                       fg='#5E9F61', highlightbackground='#424242',
                       command=lambda: self.switch_plot("size")).pack(pady=5, fill=tk.X)
-            tk.Button(right_frame, text="Algaes", font=("Arial", 12), bg='#333333',
+            tk.Button(right_frame, text="Food", font=("Arial", 12), bg='#333333',
                       fg='#5E9F61', highlightbackground='#424242',
-                      command=lambda: self.switch_plot("algaes")).pack(pady=5, fill=tk.X)
+                      command=lambda: self.switch_plot("food")).pack(pady=5, fill=tk.X)
+            tk.Button(right_frame, text="Algae", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', highlightbackground='#424242',
+                      command=lambda: self.switch_plot("algae")).pack(pady=5, fill=tk.X)
                     
             self.figure, self.ax = plt.subplots(figsize=(6, 4))
 
@@ -1648,9 +1715,12 @@ class Plot:
             self.ax.set_ylabel("Population")
             max_y = max([info[1] for info in self.fish_info] + [1]) * 1.2
             self.ax.set_ylim(0, max_y)
-            self.ax.plot([info[0] for info in self.fish_info], [info[1] for info in self.fish_info], label="Total Fish")
-            self.ax.plot([info[0] for info in self.fish_info], [info[2] for info in self.fish_info], label="Predators")
-            self.ax.plot([info[0] for info in self.fish_info], [info[3] for info in self.fish_info], label="Prey")
+            self.ax.plot([info[0] for info in self.fish_info],
+                            [info[1] for info in self.fish_info], label="Total Fish")
+            self.ax.plot([info[0] for info in self.fish_info],
+                            [info[2] for info in self.fish_info], label="Predators")
+            self.ax.plot([info[0] for info in self.fish_info],
+                            [info[3] for info in self.fish_info], label="Prey")
             self.ax.legend()
 
         elif self.current_plot_type == "energy":
@@ -1659,8 +1729,10 @@ class Plot:
             self.ax.set_ylabel("Average Energy")
             max_y = max([max(info[1], info[2]) for info in self.energy_info] + [1]) * 1.2
             self.ax.set_ylim(0, max_y)
-            self.ax.plot([info[0] for info in self.energy_info], [info[1] for info in self.energy_info], label="Predators")
-            self.ax.plot([info[0] for info in self.energy_info], [info[2] for info in self.energy_info], label="Prey")
+            self.ax.plot([info[0] for info in self.energy_info],
+                            [info[1] for info in self.energy_info], label="Predators")
+            self.ax.plot([info[0] for info in self.energy_info],
+                            [info[2] for info in self.energy_info], label="Prey")
             self.ax.legend()
 
         elif self.current_plot_type == "size":
@@ -1669,17 +1741,34 @@ class Plot:
             self.ax.set_ylabel("Average Size")
             max_y = max([max(info[1], info[2]) for info in self.size_info] + [1]) * 1.2
             self.ax.set_ylim(0, max_y)
-            self.ax.plot([info[0] for info in self.size_info], [info[1] for info in self.size_info], label="Predators")
-            self.ax.plot([info[0] for info in self.size_info], [info[2] for info in self.size_info], label="Prey")
+            self.ax.plot([info[0] for info in self.size_info],
+                            [info[1] for info in self.size_info], label="Predators")
+            self.ax.plot([info[0] for info in self.size_info],
+                            [info[2] for info in self.size_info], label="Prey")
             self.ax.legend()
 
-        elif self.current_plot_type == "algaes":
+        elif self.current_plot_type == "food":
+            self.ax.set_title("Food Over Time")
+            self.ax.set_xlabel("Time")
+            self.ax.set_ylabel("Food")
+            max_y = max([max(info[1], info[2], info[3]) for info in self.food_info] + [1]) * 1.3
+            self.ax.set_ylim(0, max_y)
+            self.ax.plot([info[0] for info in self.food_info],
+                            [info[1] for info in self.food_info], label="Plankton")
+            self.ax.plot([info[0] for info in self.food_info],
+                            [info[2] for info in self.food_info], label="Crustaceans")
+            self.ax.plot([info[0] for info in self.food_info],
+                            [info[3] for info in self.food_info], label="Dead Parts")
+            self.ax.legend()
+        
+        elif self.current_plot_type == "algae":
             self.ax.set_title("Algae Parts Over Time")
             self.ax.set_xlabel("Time")
             self.ax.set_ylabel("Algae Parts")
-            max_y = max([info[1] for info in self.algaes_info] + [1]) * 1.2
+            max_y = max([info[1] for info in self.algae_info] + [1]) * 1.2
             self.ax.set_ylim(0, max_y)
-            self.ax.plot([info[0] for info in self.algaes_info], [info[1] for info in self.algaes_info], label="Algae Parts")
+            self.ax.plot([info[0] for info in self.algae_info],
+                            [info[1] for info in self.algae_info], label="Algae Parts")
             self.ax.legend()
 
         self.canvas.draw()
