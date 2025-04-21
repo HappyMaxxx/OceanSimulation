@@ -1,12 +1,14 @@
-import pygame
-import random
+import cProfile
 import math
-import noise
+import random
 import tkinter as tk
 from threading import Thread
+
 import matplotlib.pyplot as plt
+import noise
+import pygame
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import cProfile
+
 from settings import *
 
 pygame.init()
@@ -1143,6 +1145,184 @@ class FishDetailsWindow:
         self.window.destroy()
 
 
+class FishCreationWindow:
+    def __init__(self, simulation: 'Simulation', x: int, y: int) -> None:
+        def open_window():
+            self.simulation = simulation
+            self.x = x
+            self.y = y
+            self.simulation.paused = True
+            self.window = tk.Tk()
+            self.window.title("Create Fish")
+            self.window.geometry("1000x500")
+            self.window.configure(bg='#242424')
+
+            self.entries = {}
+            self.genome_entries = {}
+
+            content_frame = tk.Frame(self.window, bg='#242424')
+            content_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+            genome_frame = tk.Frame(content_frame, bg='#242424')
+            genome_frame.pack(side=tk.LEFT, padx=10, fill=tk.Y)
+
+            tk.Label(genome_frame, text="Genome Alleles (0.0-1.0)", font=("Arial", 12, "bold"), bg='#242424', fg='#5E9F61').grid(row=0, column=0, columnspan=4, pady=5)
+
+            genome_traits = ["speed", "size", "vision", "metabolism", "digestion", "reproduction", "defense", "color", "preferred_depth", "predator", "reproduction_strategy"]
+            for i, trait in enumerate(genome_traits):
+                tk.Label(genome_frame, text=f"{trait} A1", font=("Arial", 10), bg='#242424', fg='#5E9F61').grid(row=i+1, column=0, sticky="w", pady=2)
+                entry1 = tk.Entry(genome_frame, font=("Arial", 10), bg='#333333', fg='#5E9F61', insertbackground='#5E9F61')
+                entry1.insert(0, "0.5")
+                entry1.grid(row=i+1, column=1, padx=5, pady=2)
+                tk.Label(genome_frame, text=f"{trait} A2", font=("Arial", 10), bg='#242424', fg='#5E9F61').grid(row=i+1, column=2, sticky="w", pady=2)
+                entry2 = tk.Entry(genome_frame, font=("Arial", 10), bg='#333333', fg='#5E9F61', insertbackground='#5E9F61')
+                entry2.insert(0, "0.5")
+                entry2.grid(row=i+1, column=3, padx=5, pady=2)
+                self.genome_entries[trait] = (entry1, entry2)
+
+            main_frame = tk.Frame(content_frame, bg='#242424')
+            main_frame.pack(side=tk.RIGHT, padx=10, fill=tk.Y)
+
+            attributes = [
+                ("Energy", 50.0, 0.0, 100.0),
+                ("Max Age", 100.0, 10.0, 200.0),
+                ("Max Size", 5.0, 1.0, 15.0),
+                ("Speed", 2.0, 0.5, 5.0),
+                ("Vision", 50.0, 10.0, 100.0),
+                ("Metabolism", 0.5, 0.1, 1.0),
+                ("Digestion", 0.5, 0.1, 1.0),
+                ("Reproduction Rate", 0.5, 0.1, 1.0),
+                ("Defense", 0.5, 0.1, 1.0),
+                ("Preferred Depth", HEIGHT/2, 0.0, HEIGHT),
+                ("Predator (0-1)", 0.5, 0.0, 1.0)
+            ]
+
+            for i, (label, default, min_val, max_val) in enumerate(attributes):
+                tk.Label(main_frame, text=label, font=("Arial", 10), bg='#242424',
+                         fg='#5E9F61').grid(row=i, column=0, sticky="w", pady=2)
+                entry = tk.Entry(main_frame, font=("Arial", 10), bg='#333333',
+                                 fg='#5E9F61', insertbackground='#5E9F61')
+                entry.insert(0, str(default))
+                entry.grid(row=i, column=1, padx=5, pady=2)
+                self.entries[label] = (entry, min_val, max_val)
+
+            tk.Label(main_frame, text="Gender", font=("Arial", 10), bg='#242424',
+                     fg='#5E9F61').grid(row=len(attributes), column=0, sticky="w", pady=2)
+            self.gender_var = tk.StringVar(value="Male")
+            tk.Radiobutton(main_frame, text="Male", variable=self.gender_var, value="Male",
+                           bg='#242424', fg='#5E9F61', selectcolor='#333333').grid(row=len(attributes), column=1, sticky="w")
+            tk.Radiobutton(main_frame, text="Female", variable=self.gender_var, value="Female",
+                           bg='#242424', fg='#5E9F61', selectcolor='#333333').grid(row=len(attributes), column=1, sticky="e")
+
+            tk.Label(main_frame, text="Reproduction Strategy", font=("Arial", 10), bg='#242424',
+                     fg='#5E9F61').grid(row=len(attributes)+1, column=0, sticky="w", pady=2)
+            self.repro_var = tk.StringVar(value="egglayer")
+            tk.Radiobutton(main_frame, text="Egg", variable=self.repro_var, value="egglayer",
+                           bg='#242424', fg='#5E9F61', selectcolor='#333333').grid(row=len(attributes)+1, column=1, sticky="w")
+            tk.Radiobutton(main_frame, text="Live", variable=self.repro_var, value="livebearer",
+                           bg='#242424', fg='#5E9F61', selectcolor='#333333').grid(row=len(attributes)+1, column=1, sticky="e")
+
+            button_frame = tk.Frame(self.window, bg='#242424')
+            button_frame.pack(pady=10)
+            tk.Button(button_frame, text="Create", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', command=self.create_fish).pack(side=tk.LEFT, padx=5)
+            tk.Button(button_frame, text="Random", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', command=self.randomize).pack(side=tk.LEFT, padx=5)
+            tk.Button(button_frame, text="Cancel", font=("Arial", 12), bg='#333333',
+                      fg='#5E9F61', command=self.close_window).pack(side=tk.LEFT, padx=5)
+
+            self.window.protocol("WM_DELETE_WINDOW", self.close_window)
+            self.window.mainloop()
+
+        Thread(target=open_window).start()
+
+    def validate_float(self, value, min_val, max_val):
+        try:
+            val = float(value)
+            return max(min_val, min(max_val, val))
+        except ValueError:
+            return min_val
+
+    def validate_genome_float(self, value):
+        try:
+            val = float(value)
+            return max(0.0, min(1.0, val))
+        except ValueError:
+            return 0.5
+
+    def randomize(self):
+        for label, (entry, min_val, max_val) in self.entries.items():
+            entry.delete(0, tk.END)
+            if label == "Predator (0-1)":
+                entry.insert(0, str(round(random.uniform(0.0, 1.0), 2)))
+            else:
+                entry.insert(0, str(round(random.uniform(min_val, max_val), 2)))
+        
+        self.gender_var.set(random.choice(["Male", "Female"]))
+        self.repro_var.set(random.choice(["egglayer", "livebearer"]))
+
+        for trait, (entry1, entry2) in self.genome_entries.items():
+            entry1.delete(0, tk.END)
+            entry2.delete(0, tk.END)
+            entry1.insert(0, str(round(random.uniform(0.0, 1.0), 2)))
+            entry2.insert(0, str(round(random.uniform(0.0, 1.0), 2)))
+
+    def create_fish(self):
+        genome = {}
+        for trait, (entry1, entry2) in self.genome_entries.items():
+            allele1 = self.validate_genome_float(entry1.get())
+            allele2 = self.validate_genome_float(entry2.get())
+            genome[trait] = {
+                "alleles": [allele1, allele2],
+                "dominance": random.choice([0, 1])
+            }
+
+        energy = self.validate_float(self.entries["Energy"][0].get(), 0.0, 100.0)
+        fish = Fish(
+            x=self.x,
+            y=self.y,
+            simulation=self.simulation,
+            energy=energy,
+            genome=genome
+        )
+        
+        # Override calculated traits with user inputs
+        fish.max_age = self.validate_float(self.entries["Max Age"][0].get(), 10.0, 200.0)
+        fish.max_size = self.validate_float(self.entries["Max Size"][0].get(), 1.0, 15.0)
+        fish.speed = self.validate_float(self.entries["Speed"][0].get(), 0.5, 5.0)
+        fish.vision = self.validate_float(self.entries["Vision"][0].get(), 10.0, 100.0)
+        fish.metabolism = self.validate_float(self.entries["Metabolism"][0].get(), 0.1, 1.0)
+        fish.digestion = self.validate_float(self.entries["Digestion"][0].get(), 0.1, 1.0)
+        fish.reproduction_rate = self.validate_float(self.entries["Reproduction Rate"][0].get(), 0.1, 1.0)
+        fish.defense = self.validate_float(self.entries["Defense"][0].get(), 0.1, 1.0)
+        fish.preferred_depth = self.validate_float(self.entries["Preferred Depth"][0].get(), 0.0, HEIGHT)
+        fish.is_predator = self.validate_float(self.entries["Predator (0-1)"][0].get(), 0.0, 1.0) > 0.5
+        fish.is_male = self.gender_var.get() == "Male"
+        fish.reproduction_strategy = self.repro_var.get()
+
+        # Recalculate dependent attributes
+        fish.max_energy = (MAX_ENERGY * (
+            SIZE_EFECT * fish.max_size +
+            DEGISTION_EFECT * fish.digestion +
+            REPRODUCTION_EFECT * fish.reproduction_rate
+        ) / (1 + METABOLISM_EFECT * fish.metabolism)) / 3
+        fish.energy = min(energy, fish.max_energy)
+        fish.color = (
+            max(0, min(255, int(genome["color"]["alleles"][0] *(100 if fish.is_predator else 255) * fish.color_modifier))),
+            max(0, min(255, int((100 + fish.size * 10) * (0.5 if fish.is_predator else 1) * fish.color_modifier))),
+            max(0, min(255, int(genome["color"]["alleles"][1] * (100 if fish.is_predator else 255) * fish.color_modifier)))
+        )
+        fish.vision_sq_o = fish.vision ** 2
+        fish.vision_sq_a = fish.vision ** 2 * VISION_REDUCTION_IN_ALGAE ** 2
+
+        self.simulation.fish_population.append(fish)
+        self.close_window()
+
+    def close_window(self) -> None:
+        self.simulation.paused = False
+        self.window.destroy()
+
+
 class EventHandler:
     def __init__(self, simulation: 'Simulation') -> None:
         self.simulation = simulation
@@ -1160,6 +1340,8 @@ class EventHandler:
                         self.simulation.plankton_list.append(Plankton(mouse_x, mouse_y))
                     elif 'Crustacean' in self.simulation.modes.active_modes:
                         self.simulation.crustacean_list.append(Crustacean(mouse_x, mouse_y))
+                    elif 'Fish' in self.simulation.modes.active_modes:
+                        FishCreationWindow(self.simulation, mouse_x, mouse_y)
 
                 else:
                     for fish in self.simulation.fish_population:
@@ -1175,9 +1357,6 @@ class EventHandler:
 
                 elif event.key == pygame.K_v or event.unicode.lower() == "м":
                     self.simulation.modes.toggle_mode('show_vision', "Vision")
-
-                elif event.key == pygame.K_c or event.unicode.lower() == "с":
-                    self.simulation.modes.toggle_mode('show_targets', "Targets")
 
                 elif event.key == pygame.K_q or event.unicode.lower() == "й":
                     self.simulation.plot.show()
@@ -1200,6 +1379,9 @@ class EventHandler:
 
                     elif event.key == pygame.K_x or event.unicode.lower() == "ч":
                         self.simulation.modes.toggle_mode('cre_crustacean', "Crustacean")
+                    
+                    elif event.key == pygame.K_c or event.unicode.lower() == "с":
+                        self.simulation.modes.toggle_mode('cre_fish', "Fish")
 
                 else:
                     if event.key == pygame.K_z or event.unicode.lower() == "я":
@@ -1207,6 +1389,9 @@ class EventHandler:
                     
                     elif event.key == pygame.K_x or event.unicode.lower() == "ч":
                         self.simulation.modes.toggle_mode('show_temp_map', "Temp Map")
+                    
+                    elif event.key == pygame.K_c or event.unicode.lower() == "с":
+                        self.simulation.modes.toggle_mode('show_targets', "Targets")
 
 
 class UI:
@@ -1275,6 +1460,8 @@ class UI:
                 mode_text = self.font.render("Plankton", True, (255, 255, 255))
             elif mode == 'Crustacean':
                 mode_text = self.font.render("Crustacean", True, (255, 255, 255))
+            elif mode == 'Fish':
+                mode_text = self.font.render("Fish", True, (255, 255, 255))
             else:
                 continue
 
@@ -1386,6 +1573,7 @@ class ModeManager:
         self.creative = False
         self.cre_plankton = False
         self.cre_crustacean = False
+        self.cre_fish = False
 
         self.active_modes = []
     
@@ -1408,13 +1596,33 @@ class ModeManager:
                 self.active_modes.remove('Temp Map')
                 self.show_temp_map = False
             
-            elif text == 'Plankton' and 'Crustacean' in self.active_modes:
+            elif text == 'Creative' and 'Targets' in self.active_modes:
+                self.active_modes.remove('Targets')
+                self.show_targets = False
+            
+            if text == 'Plankton' and 'Crustacean' in self.active_modes:
                 self.active_modes.remove('Crustacean')
                 self.cre_crustacean = False
             
-            elif text == 'Crustacean' and 'Plankton' in self.active_modes:
+            elif text == 'Plankton' and 'Fish' in self.active_modes:
+                self.active_modes.remove('Fish')
+                self.cre_fish = False
+            
+            if text == 'Crustacean' and 'Plankton' in self.active_modes:
                 self.active_modes.remove('Plankton')
                 self.cre_plankton = False
+            
+            elif text == 'Crustacean' and 'Fish' in self.active_modes:
+                self.active_modes.remove('Fish')
+                self.cre_fish = False
+            
+            if text == 'Fish' and 'Plankton' in self.active_modes:
+                self.active_modes.remove('Plankton')
+                self.cre_plankton = False
+            
+            elif text == 'Fish' and 'Crustacean' in self.active_modes:
+                self.active_modes.remove('Crustacean')
+                self.cre_crustacean = False
 
             if text not in self.active_modes:
                 self.active_modes.append(text)
@@ -1429,6 +1637,10 @@ class ModeManager:
             if 'Creative' not in self.active_modes and 'Crustacean' in self.active_modes:
                 self.active_modes.remove('Crustacean')
                 self.cre_crustacean = False
+            
+            if 'Creative' not in self.active_modes and 'Fish' in self.active_modes:
+                self.active_modes.remove('Fish')
+                self.cre_fish = False
 
 
 class CurrentGrid:
