@@ -1336,12 +1336,40 @@ class EventHandler:
                 mouse_x, mouse_y = pygame.mouse.get_pos()
 
                 if 'Creative' in self.simulation.modes.active_modes:
-                    if 'Plankton' in self.simulation.modes.active_modes:
+                    if 'Plankton' in self.simulation.modes.active_modes \
+                                and 'Deleting' not in self.simulation.modes.active_modes:
                         self.simulation.plankton_list.append(Plankton(mouse_x, mouse_y))
-                    elif 'Crustacean' in self.simulation.modes.active_modes:
+                    elif 'Crustacean' in self.simulation.modes.active_modes \
+                                and 'Deleting' not in self.simulation.modes.active_modes:
                         self.simulation.crustacean_list.append(Crustacean(mouse_x, mouse_y))
-                    elif 'Fish' in self.simulation.modes.active_modes:
+                    elif 'Fish' in self.simulation.modes.active_modes \
+                                and 'Deleting' not in self.simulation.modes.active_modes:
                         FishCreationWindow(self.simulation, mouse_x, mouse_y)
+                    
+                    elif 'Deleting' in self.simulation.modes.active_modes:
+                        if 'Fish' in self.simulation.modes.active_modes:
+                            for fish in self.simulation.fish_population:
+                                dist_sq = (fish.x - mouse_x) ** 2 + (fish.y - mouse_y) ** 2
+                                threshold_sq = (fish.size + 5) ** 2
+                                if dist_sq < threshold_sq:
+                                    self.simulation.fish_population.remove(fish)
+                                    break
+                        
+                        elif 'Plankton' in self.simulation.modes.active_modes:
+                            for plankton in self.simulation.plankton_list:
+                                dist_sq = (plankton.x - mouse_x) ** 2 + (plankton.y - mouse_y) ** 2
+                                threshold_sq = 4
+                                if dist_sq < threshold_sq:
+                                    self.simulation.plankton_list.remove(plankton)
+                                    break
+                        
+                        elif 'Crustacean' in self.simulation.modes.active_modes:
+                            for crustacean in self.simulation.crustacean_list:
+                                dist_sq = (crustacean.x - mouse_x) ** 2 + (crustacean.y - mouse_y) ** 2
+                                threshold_sq = 9
+                                if dist_sq < threshold_sq:
+                                    self.simulation.crustacean_list.remove(crustacean)
+                                    break
 
                 else:
                     for fish in self.simulation.fish_population:
@@ -1382,6 +1410,9 @@ class EventHandler:
                     
                     elif event.key == pygame.K_c or event.unicode.lower() == "с":
                         self.simulation.modes.toggle_mode('cre_fish', "Fish")
+                    
+                    elif event.key == pygame.K_d or event.unicode.lower() == "в":
+                        self.simulation.modes.toggle_mode('cre_del', "Deleting")
 
                 else:
                     if event.key == pygame.K_z or event.unicode.lower() == "я":
@@ -1462,6 +1493,8 @@ class UI:
                 mode_text = self.font.render("Crustacean", True, (255, 255, 255))
             elif mode == 'Fish':
                 mode_text = self.font.render("Fish", True, (255, 255, 255))
+            elif mode == 'Deleting':
+                mode_text = self.font.render("Deleting", True, (255, 255, 255))
             else:
                 continue
 
@@ -1574,6 +1607,7 @@ class ModeManager:
         self.cre_plankton = False
         self.cre_crustacean = False
         self.cre_fish = False
+        self.cre_del = False
 
         self.active_modes = []
     
@@ -1634,13 +1668,17 @@ class ModeManager:
                 self.active_modes.remove('Plankton')
                 self.cre_plankton = False
             
-            if 'Creative' not in self.active_modes and 'Crustacean' in self.active_modes:
+            elif 'Creative' not in self.active_modes and 'Crustacean' in self.active_modes:
                 self.active_modes.remove('Crustacean')
                 self.cre_crustacean = False
             
-            if 'Creative' not in self.active_modes and 'Fish' in self.active_modes:
+            elif 'Creative' not in self.active_modes and 'Fish' in self.active_modes:
                 self.active_modes.remove('Fish')
                 self.cre_fish = False
+            
+            if 'Creative' not in self.active_modes and 'Deleting' in self.active_modes:
+                self.active_modes.remove('Deleting')
+                self.cre_del = False
 
 
 class CurrentGrid:
