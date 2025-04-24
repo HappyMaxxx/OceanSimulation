@@ -13,30 +13,25 @@ Fish Simulation is a Python-based project that models an underwater ecosystem us
 - **Creative Mode**: Enables users to add or remove entities manually.
 - **Event Handling**: Supports mouse and keyboard inputs for interaction.
 
-## Requirements
-- Python 3.8+
-- Pygame
-- Matplotlib
-- NumPy
-- Noise
-- Tkinter (included with standard Python)
-
-Install dependencies using:
-```bash
-pip install pygame matplotlib numpy pynoise
-```
-
 ## Installation
 1. Clone the repository:
    ```bash
    git clone https://github.com/HappyMaxxx/OceanSimulation fish-simulation
    cd fish-simulation
    ```
-2. Install the required dependencies:
+2. Create and activate a Python virtual environment:  
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # For Linux and macOS
+   # or
+   python -m venv venv
+   venv\Scripts\activate     # For Windows
+   ```
+3. Install the required dependencies:
    ```bash
    pip install -r requirements.txt
    ```
-3. Run the simulation:
+4. Run the simulation:
    ```bash
    python main.py
    ```
@@ -80,8 +75,21 @@ Simulation parameters (e.g., screen dimensions, initial populations, genetic mut
 
 ## Notes
 - The simulation uses a grid-based system for efficient collision detection and environmental calculations.
-- Performance can be monitored with FPS display (`E`) or profiled using `cProfile` (enable `PROFILING` in `main.py`).
+- Performance can be monitored with FPS display (`E`) or profiled using `cProfile` (enable `PROFILING` in `core/settings.py`).
 - The project is designed for educational and experimental purposes, showcasing ecological and evolutionary concepts.
+
+## Requirements
+- Python 3.8+
+- Pygame
+- Matplotlib
+- NumPy
+- Noise
+- Tkinter (included with standard Python)
+
+Install dependencies using:
+```bash
+pip install pygame matplotlib numpy pynoise
+```
 
 ## Contributing
 Contributions are welcome! Please fork the repository, create a new branch, and submit a pull request with your changes. Ensure code follows PEP 8 style guidelines.
