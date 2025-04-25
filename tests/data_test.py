@@ -1,9 +1,11 @@
+import ast
 import tkinter as tk
 from tkinter import ttk
+
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
-import ast
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 
 class FunctionGrapher:
     def __init__(self, root):
