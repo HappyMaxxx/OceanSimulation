@@ -55,9 +55,15 @@ Fish Simulation is a Python-based project that models an underwater ecosystem us
 - **Plots**: Press `Q` to view real-time graphs of population, energy, size, food, and algae.
 
 ## Project Structure
-- `main.py`: The main simulation script containing all classes and logic.
-- `settings.py`: Configuration file with constants (e.g., screen size, simulation parameters).
-- `README.md`: Project documentation.
+- 'main.py' – Entry point of the simulation.
+- 'core/' – Contains the core simulation logic.
+- 'entities/' – Defines ecosystem entities.
+- 'ui/' – User interface components.
+- 'plots/' – Real-time data visualization.
+- 'tests/' – Unit tests for components, program for testing formulas.
+- 'requirements.txt' – Python dependencies.
+- 'README.md' – Project documentation.
+- 'LICENSE' – Project license file.
 
 ## Key Classes
 - **Simulation**: Manages the overall simulation, including time, seasons, and entity updates.
