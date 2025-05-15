@@ -101,7 +101,7 @@ pip install pygame matplotlib numpy pynoise
 Contributions are welcome! Please fork the repository, create a new branch, and submit a pull request with your changes. Ensure code follows PEP 8 style guidelines.
 
 ## License
-This project is licensed under the Apache 2.0 License. See the `LICENSE` file for details.
+This project is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 - Built with Pygame for rendering and event handling.
